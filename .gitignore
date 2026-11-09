@@ -1,0 +1,6 @@
+.DS_Store
+# Written by Herdr into each mod (herdr-app check, or loading the mod)
+gpui-kit.d.ts
+herdr.d.ts
+jsconfig.json
+*.error

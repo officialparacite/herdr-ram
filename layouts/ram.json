@@ -1,0 +1,134 @@
+{
+  "id": "ram-root",
+  "type": "column",
+  "titlebar": "none",
+  "traffic_lights": [
+    18,
+    18
+  ],
+  "theme": "ram",
+  "font": "JetBrains Mono",
+  "ui_font": "JetBrains Mono",
+  "terminal_padding": [
+    10,
+    12
+  ],
+  "terminal_opacity": 1,
+  "background": {
+    "gradient": [
+      "#08110c",
+      "#050806"
+    ],
+    "angle": 180
+  },
+  "preview": "layouts/ram.svg",
+  "resizable": false,
+  "children": [
+    {
+      "id": "ram-map",
+      "type": "block",
+      "size": {
+        "px": 74
+      },
+      "content": {
+        "mod": "ram"
+      },
+      "window_drag": true
+    },
+    {
+      "id": "ram-work",
+      "type": "row",
+      "size": {
+        "weight": 1
+      },
+      "min": 150,
+      "gap": 10,
+      "padding": [
+        8,
+        12
+      ],
+      "resizable": true,
+      "children": [
+        {
+          "id": "sidebar",
+          "type": "block",
+          "size": {
+            "px": 340
+          },
+          "min": 240,
+          "content": {
+            "mod": "ram",
+            "props": {
+              "role": "side"
+            }
+          }
+        },
+        {
+          "id": "ram-main",
+          "type": "column",
+          "size": {
+            "weight": 1
+          },
+          "gap": 8,
+          "resizable": false,
+          "children": [
+            {
+              "id": "ram-terminals",
+              "type": "block",
+              "size": {
+                "weight": 2
+              },
+              "min": 120,
+              "content": {
+                "tab": "active",
+                "pane": {
+                  "gap": 8,
+                  "radius": 2,
+                  "lone": true,
+                  "background": "#0a100d",
+                  "border": {
+                    "width": 1,
+                    "color": "#24402f"
+                  },
+                  "focus": {
+                    "width": 1,
+                    "color": "#ffb547"
+                  }
+                }
+              }
+            },
+            {
+              "id": "ram-rams",
+              "type": "block",
+              "size": {
+                "weight": 1
+              },
+              "min": 168,
+              "hidden": true,
+              "content": {
+                "mod": "ram",
+                "props": {
+                  "role": "rams"
+                }
+              }
+            },
+            {
+              "id": "ram-peek",
+              "type": "block",
+              "size": {
+                "px": 180
+              },
+              "hidden": true,
+              "content": {
+                "mod": "ram",
+                "props": {
+                  "role": "peek"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
