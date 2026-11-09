@@ -32,6 +32,11 @@ const MAX_DIFF = 1500;
 // Files the tree lists per repo (the rest are "+n more files").
 const TREE_FILES = 150;
 const LETTER = { A: GREEN, D: RED, U: RED, R: CYAN, M: AMBER };
+// The tree's indents: a space's address starts TREE_X in (its row's padding,
+// the fold arrow and the gap after it); its repos and files go TREE_STEP
+// further in, and a repo's files another TREE_STEP, so they read as the
+// space's own rows, not more spaces.
+const TREE_X = (6 + 11 + 5) * U, TREE_STEP = 12 * U;
 // Each kind of tree row's height, for sizing its box.
 const ROW_H = { space: SPACE_ROW, repo: REPO_ROW, file: FILE_ROW, more: FILE_ROW };
 const minus = n => `\u2212${n}`;
@@ -145,10 +150,12 @@ export class AllStick {
       if (this.fold.has(s.id)) return;
       for (const r of repos) {
         if (!r.dirty) continue;
-        if (repos.length > 1) out.push({ kind: "repo", key: `r:${s.id}:${r.top}`, s, r });
+        // One repo: its files are the space's children; more: each repo's are its own.
+        const depth = repos.length > 1 ? 2 : 1;
+        if (depth === 2) out.push({ kind: "repo", key: `r:${s.id}:${r.top}`, s, r });
         const files = r.files.slice(0, TREE_FILES);
-        for (const f of files) out.push({ kind: "file", key: `f:${s.id}:${r.top}:${f.path}`, s, r, f });
-        if (r.dirty > files.length) out.push({ kind: "more", key: `m:${s.id}:${r.top}`, n: r.dirty - files.length });
+        for (const f of files) out.push({ kind: "file", key: `f:${s.id}:${r.top}:${f.path}`, s, r, f, depth });
+        if (r.dirty > files.length) out.push({ kind: "more", key: `m:${s.id}:${r.top}`, n: r.dirty - files.length, depth });
       }
     });
     return out;
@@ -297,9 +304,9 @@ export class AllStick {
 
   row(r, data, t) {
     if (r.kind === "space") return this.spaceRow(r, data, t);
-    if (r.kind === "repo") return h_flex().h(REPO_ROW).flex_none().pl(20 * U).pr(6 * U).items_center().text_size(10 * U).text_color(t.dim)
+    if (r.kind === "repo") return h_flex().h(REPO_ROW).flex_none().pl(TREE_X + TREE_STEP).pr(6 * U).items_center().text_size(10 * U).text_color(t.dim)
       .child(div().min_w(0).truncate().child(`${r.r.name} \u00b7 ${r.r.branch ?? "detached"}`));
-    if (r.kind === "more") return div().h(FILE_ROW).flex_none().pl(24 * U).flex().items_center().text_size(10 * U).text_color(t.dim)
+    if (r.kind === "more") return div().h(FILE_ROW).flex_none().pl(TREE_X + TREE_STEP * r.depth + 2 * U).flex().items_center().text_size(10 * U).text_color(t.dim)
       .child(`+${r.n} more files`);
     return this.fileRow(r, t);
   }
@@ -337,11 +344,11 @@ export class AllStick {
         .text_size(10 * U).text_color(RED).child(`!${blocked}`)));
   }
 
-  fileRow({ s, r, f }, t) {
+  fileRow({ s, r, f, depth }, t) {
     const here = this.sel && this.sel.space === s.id && this.sel.top === r.top && this.sel.path === f.path;
     const parts = f.path.split("/"), name = parts.pop(), dir = parts.length ? parts.join("/") + "/" : "";
     const lines = f.binary ? "binary" : `+${f.add ?? 0} ${minus(f.del ?? 0)}`;
-    return h_flex().id(`all-file-${s.id}:${f.path}`).h(FILE_ROW).flex_none().pl(22 * U).pr(6 * U).gap(6 * U).items_center()
+    return h_flex().id(`all-file-${s.id}:${f.path}`).h(FILE_ROW).flex_none().pl(TREE_X + TREE_STEP * depth).pr(6 * U).gap(6 * U).items_center()
       .cursor_pointer().when(here, el => el.bg(t.selected)).hover(st => st.bg(t.hover))
       .tooltip(`${f.path}: ${f.fresh ? "new file" : lines}`)
       .on_mouse_down("left", stop)
