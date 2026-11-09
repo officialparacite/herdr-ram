@@ -25,8 +25,8 @@ to review its diff. Comes with lazygit, a ctrl-b key bar and a Neovim theme.
   you're in (cyan address), its tabs as fixed 118x23 chips (`*1` the shown
   tab, `&2` the rest, `!n` when an agent there needs you; long names
   truncate), one square `+`, and on the right `^b` and fixed level buttons
-  `f follow` (meta only), `m meta`, `i space`, `r hunk`, each with its key in
-  amber, the current level lit. The left 100 points stay clear of the macOS
+  `m meta`, `i space`, `r hunk`, each with its key in amber, the current level
+  lit. The left 100 points stay clear of the macOS
   window buttons.
 - **The side column** (block `sidebar`) is 390px in meta, 340px in space and
   280px in hunk. Its edge drags (down to 240px) and each level keeps the
@@ -39,7 +39,9 @@ to review its diff. Comes with lazygit, a ctrl-b key bar and a Neovim theme.
   (one row per agent: light, `&n`, name, what it does, its state) over
   `HEAP ↑ n`, the git line (`branch ↑2 ↓1 ±3 ⌂`, or `✓`, and a `+` for a new
   tab), and gold pins. Sticks share one width, 200x1.25, narrowing to 80%
-  before the row scrolls; the space you're in has an amber outline, another
+  before the row scrolls. Right of the last stick, two 30x1.25 squares: a
+  dashed `+` (a new space) and under it follow's `f` (its `^b` key), amber
+  while follow is on; the space you're in has an amber outline, another
   machine's a dashed one. The side column is the **main stick** `0x00 @`:
   its STACK is every space with its changed files as a tree (letter,
   folder/name, `+added −removed`, an arrow folds a space, `+` makes a space),
@@ -78,9 +80,11 @@ to review its diff. Comes with lazygit, a ctrl-b key bar and a Neovim theme.
   a line where they land.
 - `^b m` meta (again: back into the space), `^b i` space, `^b r` hunk (the
   space's last review, else the review menu; again: back to your tab, the
-  review stays open), `^b f` follow in meta (when an agent newly needs you,
-  show the one waiting longest; wait while the shown tab's agent needs you;
-  move on once it's answered; never undo a tab you picked), `^b d` the main
+  review stays open), `^b f` or the `f` square follow in meta (when an agent
+  newly needs you, show the one waiting longest; wait while the shown tab's
+  agent needs you; move on once it's answered; never undo a tab you picked;
+  once nothing has needed you for a second, go back to the tab you were on
+  before its first move, unless that tab closed or you picked another), `^b d` the main
   stick's diff view (from another level: meta with diff), `^b g` lazygit.
 - `^b w` navigate mode: the bar shows one row (`navigate`, the space's name,
   `@machine`, `i of n`); `j`/down and `k`/up move round the ends, Enter goes

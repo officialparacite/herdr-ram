@@ -92,8 +92,9 @@ to Herdr's `main` layout and default keys.
 
 The strip on top shows the space you're in, its tabs and the level buttons in
 every level. In meta, clicks only select (the terminal shows it, you stay in
-meta), `^b f` (follow) shows each agent that needs you, and `^b d` switches the
-main stick between memory and diff.
+meta), `^b f` or the `f` under the sticks' `+` (follow) shows each agent that
+needs you and then takes you back to your tab, and `^b d` switches the main
+stick between memory and diff.
 
 ## Keys
 

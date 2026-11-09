@@ -334,7 +334,8 @@ await settle();
 assert.deepEqual(layoutCalls(), [{ name: "layout.resize", args: { id: "ram-map", px: 74 } },
   { name: "layout.resize", args: { id: "sidebar", px: 390 } }, { name: "layout.hide", args: { id: "ram-peek" } },
   { name: "layout.show", args: { id: "ram-rams" } }]);
-assert(withId(tree, "ram-strip") && withId(tree, "tabchip-tab0-0") && withId(tree, "ram-follow"), "the strip stays on top: the space's tabs, and follow");
+assert(withId(tree, "ram-strip") && withId(tree, "tabchip-tab0-0"), "the strip stays on top: the space's tabs");
+assert(!withId(tree, "ram-follow"), "follow isn't on the strip: its f is under the sticks' +");
 assert(!flatten(tree).some(n => /^region-/.test(idOf(n) ?? "")), "the space sticks aren't on the strip");
 assert.deepEqual(op(withId(tree, "ram-level-meta"), "border_color"), ["#ffb547"], "meta is lit");
 // The space sticks are a copy of their own (role rams), in the block under the terminal.
@@ -351,6 +352,13 @@ assert(widths.reduce((n, w) => n + w, 0) <= 1400, `the sticks fit the block: ${w
 assert.equal(new Set(widths).size, 1, `every stick one width: ${widths}`);
 for (const id of ["frame-tab0-0", "frame-tab0-1", "alloc-t1", "alloc-t2", "alloc-child", "block-t1", "block-child", "ram-scan", "ram-new-space"])
   assert(withId(tree, id), id);
+// Right of the last stick: + (a new space) and under it follow's f, two squares of one size.
+assert.equal(idOf(withId(tree, "ram-regions").kids.at(-1)), "ram-stick-buttons", "after the last stick");
+assert.deepEqual(withId(tree, "ram-stick-buttons").kids.map(idOf), ["ram-new-space", "ram-follow"], "the f is under the +");
+assert.equal(withId(tree, "ram-stick-buttons").kind, "v_flex", "one over the other");
+for (const id of ["ram-new-space", "ram-follow"])
+  assert.deepEqual([op(withId(tree, id), "w")[0], op(withId(tree, id), "h")[0]], [30 * 1.25, 30 * 1.25], `${id} is a square`);
+assert.deepEqual(textOf(withId(tree, "ram-follow")), ["f"], "just its key");
 // *1 of api has five blocks (t1, its sub-agent, t5, t9 and a shell): the first two fit, +3 counts the rest.
 assert.deepEqual(textOf(withId(tree, "more-tab0-0")), ["+3"]);
 assert.equal(op(withId(tree, "more-tab0-0"), "tooltip")[0], "3 more: Claude, Claude, zsh");
@@ -477,7 +485,7 @@ const r0 = flatten(withId(tree, "region-s0"));
 const heapLabelAt = r0.findIndex(n => n.kids.includes("HEAP \u2191  5")), gitAt = r0.findIndex(n => idOf(n) === "git-s0");
 assert(r0.slice(heapLabelAt + 1, gitAt).some(n => op(n, "h")?.[0] === 8 * 1.25), "a gap between HEAP's label and the git line");
 rams.size = { width: 1400, height: 340 };
-console.log("PASS: meta: the strip on top (tabs, follow); under the terminal every space a stick of one width that fits its block (frames down with a hover x, heap up, +n more where it fits), clicks only select, git lines open lazygit");
+console.log("PASS: meta: the strip on top (tabs); under the terminal every space a stick of one width that fits its block (frames down with a hover x, heap up, +n more where it fits), clicks only select, git lines open lazygit");
 
 // ---- Nothing in a stick goes past its edge, however narrow it gets ----------------------
 {
@@ -1281,12 +1289,17 @@ const show = (spaceId, tabId) => {
 const focusCalls = () => host.calls.filter(c => c.name === "agent.focus");
 const fmap = view({});
 fmap.size = { width: 1600, height: 700 };
+// follow's f is on the sticks (role rams); follow itself runs in the strip's copy.
+const frams = view({ role: "rams" });
+frams.size = { width: 1400, height: 340 };
+const FR = () => R(frams, { role: "rams" });
 host.shared.set("ram.zoom", "meta"); host.shared.set("ram.follow", false);
 host.calls = [];
 let ft = R(fmap, {}); await settle();
 assert.equal(focusCalls().length, 0, "follow off: nothing moves");
-assert(withId(ft, "ram-follow") && !op(withId(ft, "ram-follow"), "bg"), "meta shows a follow button, off");
-click(ft, "ram-follow");
+assert(withId(FR(), "ram-follow") && !op(withId(FR(), "ram-follow"), "bg"), "meta's f is off");
+assert(op(withId(FR(), "ram-follow"), "tooltip")[0].endsWith("  ^b f"), "its tooltip says its key");
+click(FR(), "ram-follow");
 assert.equal(host.shared.get("ram.follow"), true);
 R(fmap, {}); await settle();
 assert.deepEqual(focusCalls(), [{ name: "agent.focus", args: { terminal: "t6" } }], "on: the agent that has waited longest");
@@ -1294,7 +1307,7 @@ show("s1", "tab1-0");
 host.calls = [];
 R(fmap, {}); await settle();
 assert.equal(focusCalls().length, 0, "it stays there: nothing new happened");
-assert.deepEqual(op(withId(R(fmap, {}), "ram-follow"), "border_color"), ["#ffb547"], "the button is lit");
+assert.deepEqual(op(withId(FR(), "ram-follow"), "border_color"), ["#ffb547"], "the f is lit");
 // Another agent starts needing you while the one you're on still does: follow waits.
 agentList[3].status = "blocked"; raw[3].status_ms = Date.now();
 R(fmap, {}); await settle();
@@ -1332,10 +1345,130 @@ assert.equal(keysFile[`mod:${BAR}`].f, `${BAR}.ram.follow`);
 Object.assign(agentList[3], { status: "idle" }); Object.assign(agentList[5], { status: "blocked" });
 Object.assign(agentList[6], { status: "idle" }); Object.assign(agentList[8], { status: "idle" });
 raw.forEach((r, i) => { if (i < 10) r.status_ms = now - i * 1000; });
+// The way back: a second after nothing needs you any more, follow shows the tab
+// you were on before its first move. A fresh strip copy, so nothing above carries
+// over; the clock is moved on by hand (later).
+{
+  const realNow = Date.now;
+  let skew = 0;
+  Date.now = () => realNow() + skew;
+  const later = ms => { skew += ms; };
+  const before = host.timers.length;
+  const fb = view({});
+  fb.size = { width: 1600, height: 700 };
+  const tick = host.timers.slice(before)[1];
+  assert.equal(tick.ms, 250, "the strip's 250 ms tick (the side column's edge) checks the way back");
+  const FB = async () => { R(fb, {}); await settle(); };
+  const selects = () => host.calls.filter(c => c.name === "space.select" || c.name === "tab.select");
+  const back = [{ name: "space.select", args: { id: "s3" } }, { name: "tab.select", args: { id: "tab3-1" } }];
+  const t2 = agentList[1], t6 = agentList[5];
+  const ask = (a, i) => { a.status = "blocked"; raw[i].status_ms = Date.now(); };
+  host.shared.set("ram.zoom", "meta"); host.shared.set("ram.follow", true);
+  // Only t6 (web *1) needs you; you're on docs &2.
+  t2.status = "idle";
+  show("s3", "tab3-1"); host.calls = [];
+  await FB();
+  assert.deepEqual(focusCalls(), [{ name: "agent.focus", args: { terminal: "t6" } }]);
+  show("s1", "tab1-0"); await FB();
+  t6.status = "working"; await FB();
+  tick.fn(cx);
+  assert.deepEqual(selects(), [], "answered: not back at once");
+  later(1100); tick.fn(cx);
+  assert.deepEqual(selects(), back, "a second later: back to docs &2");
+  show("s3", "tab3-1"); host.calls = [];
+  later(1100); tick.fn(cx);
+  assert.deepEqual(selects(), [], "only once");
+  // It asks again within the second: you stay, and go back a second after the
+  // last answer (not the first).
+  ask(t6, 5); await FB();
+  assert.deepEqual(focusCalls(), [{ name: "agent.focus", args: { terminal: "t6" } }]);
+  show("s1", "tab1-0"); await FB();
+  t6.status = "working"; await FB();
+  later(400); ask(t6, 5); await FB();
+  later(1100); tick.fn(cx);
+  assert.deepEqual(selects(), [], "it asked again straight away: you stay there");
+  t6.status = "working"; await FB();
+  later(300); tick.fn(cx);
+  assert.deepEqual(selects(), [], "0.3 s after the last answer: not yet");
+  later(800); tick.fn(cx);
+  assert.deepEqual(selects(), back, "answered again: back");
+  // Asked and answered again inside the second, with no tick between: the
+  // second counts from the last answer.
+  show("s3", "tab3-1"); host.calls = [];
+  ask(t6, 5); await FB();
+  show("s1", "tab1-0"); await FB();
+  t6.status = "working"; await FB();
+  later(400); ask(t6, 5); await FB();
+  later(400); t6.status = "working"; await FB();
+  later(300); tick.fn(cx);
+  assert.deepEqual(selects(), [], "a second from the last answer, not the first");
+  later(800); tick.fn(cx);
+  assert.deepEqual(selects(), back);
+  // An ask the strip hasn't drawn yet holds you too.
+  show("s3", "tab3-1"); host.calls = [];
+  ask(t6, 5); await FB();
+  show("s1", "tab1-0"); await FB();
+  t6.status = "working"; await FB();
+  later(1100); t6.status = "blocked"; tick.fn(cx);
+  assert.deepEqual(selects(), [], "it needs you again (not drawn yet): you stay");
+  raw[5].status_ms = Date.now(); await FB();
+  t6.status = "working"; await FB();
+  later(1100); tick.fn(cx);
+  assert.deepEqual(selects(), back);
+  // Two agents one after the other: back to where you were before the first.
+  show("s3", "tab3-1"); host.calls = [];
+  ask(t2, 1); raw[1].status_ms -= 5000; ask(t6, 5); await FB();
+  assert.deepEqual(focusCalls(), [{ name: "agent.focus", args: { terminal: "t2" } }], "t2 waited longest");
+  show("s0", "tab0-1"); await FB();
+  t2.status = "idle"; await FB();
+  assert.deepEqual(focusCalls().at(-1), { name: "agent.focus", args: { terminal: "t6" } }, "then t6");
+  show("s1", "tab1-0"); await FB();
+  t6.status = "working"; await FB();
+  later(1100); tick.fn(cx);
+  assert.deepEqual(selects(), back, "back to docs &2, not to api &2");
+  // Your tab closed meanwhile: you stay on the one you answered in.
+  show("s3", "tab3-1"); host.calls = [];
+  ask(t6, 5); await FB();
+  show("s1", "tab1-0"); await FB();
+  const docs = spaces[3], gone = docs.tabs.splice(1, 1)[0];
+  t6.status = "working"; await FB();
+  later(1100); tick.fn(cx);
+  assert.deepEqual(selects(), [], "docs &2 closed: you stay");
+  docs.tabs.splice(1, 0, gone);
+  // You picked another tab yourself after follow's move: it leaves you there.
+  show("s3", "tab3-1"); host.calls = [];
+  ask(t6, 5); await FB();
+  show("s1", "tab1-0"); await FB();
+  show("s0", "tab0-0"); await FB();
+  t6.status = "working"; await FB();
+  later(1100); tick.fn(cx);
+  assert.deepEqual(selects(), [], "you moved: no way back");
+  // Even when you go back to that agent's tab yourself before you answer.
+  show("s3", "tab3-1"); host.calls = [];
+  ask(t6, 5); await FB();
+  show("s1", "tab1-0"); await FB();
+  show("s0", "tab0-0"); await FB();
+  show("s1", "tab1-0"); await FB();
+  t6.status = "working"; await FB();
+  later(1100); tick.fn(cx);
+  assert.deepEqual(selects(), [], "you picked its tab yourself: you stay");
+  // follow turned off: no way back either.
+  show("s3", "tab3-1"); host.calls = [];
+  ask(t6, 5); await FB();
+  show("s1", "tab1-0"); await FB();
+  host.shared.set("ram.follow", false); await FB();
+  t6.status = "working"; await FB();
+  later(1100); tick.fn(cx);
+  assert.deepEqual(selects(), [], "follow off: you stay");
+  Date.now = realNow;
+  Object.assign(t2, { status: "blocked" }); Object.assign(t6, { status: "blocked" });
+  raw.forEach((r, i) => { if (i < 10) r.status_ms = now - i * 1000; });
+  host.shared.set("ram.follow", false);
+}
 show("s0", "tab0-0");
 host.shared.set("ram.from", { s0: "tab0-0" });
 host.shared.set("ram.zoom", "space"); host.calls = [];
-console.log("PASS: follow (meta): shows the agent waiting longest, waits while yours needs you, moves on once answered, never undoes your own pick; ^b f");
+console.log("PASS: follow (meta, its f under the sticks' +): shows the agent waiting longest, waits while yours needs you, moves on once answered, never undoes your own pick, and a second after the last answer goes back to your tab (unless it closed or you moved); ^b f");
 
 // ---- Hunk level -------------------------------------------------------------------
 // hunk.js on its own: what each menu item runs, what a review is called, notes.
