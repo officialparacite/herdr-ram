@@ -1014,6 +1014,21 @@ assert.deepEqual(textOf(withId(at2, "all-file-s0:src/app.ts")), ["M", "src/", "a
   "as the Changes panel: letter, folder/ name, +added −removed");
 assert.deepEqual(textOf(withId(at2, "all-file-s0:old.txt")), ["D", "", "old.txt", "\u221240"]);
 assert(withId(at2, "all-file-s0:notes.md"));
+// A tree: a space's files start one step (12) in from where its address does, so
+// they read as its rows, not as more spaces. Several repos in one space: each repo
+// one step in, its files another.
+{
+  const spaceRow = withId(at2, "all-space-s0");
+  const addrX = op(spaceRow, "px")[0] + op(withId(at2, "all-fold-s0"), "w")[0] + op(spaceRow, "gap")[0];
+  const step = 12 * 1.25;
+  for (const id of ["all-file-s0:src/app.ts", "all-file-s0:old.txt", "all-file-s0:notes.md"])
+    assert.equal(op(withId(at2, id), "pl")[0], addrX + step, `${id}: one step in from its space's address`);
+  const s0 = spaces[0], r = { ...apiGit, name: "herdr" }, f = apiGit.files[0], t = host.colors;
+  assert.equal(op(aside.all.row({ kind: "repo", s: s0, r }, {}, t), "pl")[0], addrX + step, "a repo: one step in");
+  assert.equal(op(aside.all.row({ kind: "file", s: s0, r, f, depth: 2 }, {}, t), "pl")[0], addrX + 2 * step, "its files: two");
+  assert.equal(op(aside.all.row({ kind: "more", n: 3, depth: 2 }, {}, t), "pl")[0], addrX + 2 * step + 2 * 1.25, "its +n more, with them");
+  assert.equal(op(aside.all.row({ kind: "more", n: 3, depth: 1 }, {}, t), "pl")[0], addrX + step + 2 * 1.25);
+}
 host.calls = [];
 click(at2, "all-space-s1");
 assert.deepEqual(host.calls, [{ name: "space.select", args: { id: "s1" } }]);
