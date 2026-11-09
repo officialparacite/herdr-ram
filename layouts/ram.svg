@@ -16,7 +16,6 @@
     <rect x="68" y="9" width="30" height="8" rx="0.8" fill="#0b130f" stroke="#24402f"/>
     <rect x="101" y="9" width="30" height="8" rx="0.8" fill="#0b130f" stroke="#24402f"/>
     <rect x="134" y="9" width="8" height="8" rx="0.8" fill="#0b130f" stroke="#2c4a38"/>
-    <rect x="205" y="9" width="26" height="8" rx="0.8" fill="#0b130f" stroke="#2c4a38"/>
     <rect x="234" y="9" width="24" height="8" rx="0.8" fill="#2a2412" stroke="#ffb547"/>
     <rect x="261" y="9" width="26" height="8" rx="0.8" fill="#0b130f" stroke="#2c4a38"/>
     <rect x="290" y="9" width="24" height="8" rx="0.8" fill="#0b130f" stroke="#2c4a38"/>
@@ -26,8 +25,7 @@
     <text x="70.5" y="14.4" fill="#6f9a7e">&amp;2</text><text x="78" y="14.4" fill="#c8f7d3">zsh</text>
     <text x="103.5" y="14.4" fill="#6f9a7e">&amp;3</text><text x="111" y="14.4" fill="#c8f7d3">zsh</text>
     <text x="136.4" y="14.6" fill="#c8f7d3">+</text>
-    <text x="196" y="14.4" fill="#6f9a7e">^b</text>
-    <text x="207.5" y="14.4" fill="#ffb547">f</text><text x="212" y="14.4" fill="#5f8a70">follow</text>
+    <text x="225" y="14.4" fill="#6f9a7e">^b</text>
     <text x="236.5" y="14.4" fill="#ffb547">m</text><text x="241" y="14.4" fill="#ffb547">meta</text>
     <text x="263.5" y="14.4" fill="#ffb547">i</text><text x="268" y="14.4" fill="#5f8a70">space</text>
     <text x="292.5" y="14.4" fill="#ffb547">r</text><text x="297" y="14.4" fill="#5f8a70">hunk</text>
@@ -93,8 +91,9 @@
   <rect x="98" y="116" width="2.4" height="4" fill="#c8f7d3"/>
 
   <!-- Every space as a stick: STACK frames (each tab: SP on the shown one, &n, an arrow
-       to its blocks), HEAP growing up, the git line and the gold pins. -->
-  <g font-family="monospace">
+       to its blocks), HEAP growing up, the git line and the gold pins. Narrowed a
+       little (from x 92) to leave room for the + and f on the right. -->
+  <g font-family="monospace" transform="matrix(0.959 0 0 1 3.772 0)">
     <rect x="92" y="133" width="52" height="58" rx="1" fill="#0b130f" stroke="#24402f" stroke-width="0.5"/>
     <rect x="148" y="133" width="52" height="58" rx="1" fill="#0f1c15" stroke="#ffb547" stroke-width="0.6"/>
     <rect x="204" y="133" width="52" height="58" rx="1" fill="#0b130f" stroke="#24402f" stroke-width="0.5" stroke-dasharray="1.6 1"/>
@@ -176,5 +175,12 @@
       <rect x="207" y="192.2" width="18" height="1.6"/><rect x="229" y="192.2" width="24" height="1.6"/>
       <rect x="263" y="192.2" width="18" height="1.6"/><rect x="285" y="192.2" width="24" height="1.6"/>
     </g>
+  </g>
+  <!-- Right of the last stick: + (a new space) and under it follow's f (off here). -->
+  <rect x="306" y="133" width="6" height="6" rx="0.6" fill="none" stroke="#2c4a38" stroke-width="0.5" stroke-dasharray="1 0.7"/>
+  <rect x="306" y="141" width="6" height="6" rx="0.6" fill="none" stroke="#2c4a38" stroke-width="0.5"/>
+  <g font-family="monospace" font-size="3.6">
+    <text x="307.9" y="137.3" fill="#c8f7d3">+</text>
+    <text x="307.9" y="145.3" fill="#9fc7aa" font-weight="bold">f</text>
   </g>
 </svg>
