@@ -4,7 +4,8 @@
 //   meta      the terminal on top, and under it every space as a stick of
 //             memory (role "rams"); the side column is the main stick
 //             (0x00 @, all.js), every space and agent at once. follow
-//             (ctrl-b f) shows each agent that needs you.
+//             (the f under the sticks' +, ctrl-b f) shows each agent that
+//             needs you, then the tab you were on again.
 //   space     inside the current space: the terminal gets the room; the side
 //             column has the STACK (every space, growing down from the top),
 //             HEAP (this space's agents, growing up from the bottom), .rodata
@@ -34,6 +35,9 @@ import { AMBER, CYAN, GOLD, GREEN, RED, ROM, ROM_LINE, ROM_BG, ROM_HOVER, U, CEL
 const HEADER_H = 19 * U, LABELS_H = 13 * U, FRAME_H = 18 * U, BOTTOM_H = 21 * U, PINS_H = 6 * U, HEAP_H = 20 * U;
 const BLOCK_H = 14 * U, KID_H = 12 * U, CHAR_W = 7 * U;
 const REGION_MIN_W = 160 * U, REGION_MAX_W = 360 * U, REGION_GAP = 14 * U, NEW_W = 30 * U;
+// follow takes you back to your tab once nothing has needed you for this long
+// (an agent that asks again straight away keeps you where you are).
+const FOLLOW_BACK_MS = 1000;
 const SP_W = 24 * U, NUM_W = 26 * U, ARROW_W = 26 * U;
 // The head of a frame's arrow (its line is a div): drawn, so it sits exactly on the line.
 const ARROW_HEAD = "mods/ram/arrow.svg";
@@ -246,10 +250,13 @@ export default class Ram extends View {
     if (role) return;
     // A drag on the side column's edge is kept for the level it was made in
     // (watchSide, keepSide). Only an active window can be dragged.
+    // follow's way back (followBack) waits on the same tick.
+    this.trip = null;
     cx.timer.every(250, () => {
       if (!window()?.active) return;
       this.watchSide(level());
       this.keepSide();
+      this.followBack();
     });
     // The open hunk reviews: polled here, shared with the other copies as
     // "ram.hunk.sessions".
@@ -591,8 +598,11 @@ export default class Ram extends View {
   // space and tab, so the region lights up and the terminal below is that
   // agent. While the agent in the shown tab needs you too, follow waits, and
   // moves on to the next once you've answered (the one waiting longest first).
-  // It only acts on those changes, so picking a tab yourself is never undone:
-  // that also drops a wait. The main stick never moves.
+  // Once nothing has needed you for FOLLOW_BACK_MS, it takes you back to the
+  // tab you were on before its first move (this.trip), unless that tab has
+  // closed: then you stay. It only acts on those changes, so picking a tab
+  // yourself is never undone: that also drops a wait and the way back. The
+  // main stick never moves.
   follow(data, cx) {
     const on = shared("ram.follow") === true && level() === "meta";
     const now = new Map(data.list.filter(a => a.status === "blocked" && !a.child && a.pane)
@@ -601,18 +611,54 @@ export default class Ram extends View {
     const seen = on && !this.followOn ? new Map() : this.followSeen ?? new Map();
     this.followSeen = now;
     this.followOn = on;
-    if (!on) { this.followWait = null; return; }
-    const tab = activeSpace()?.tabs.find(t => t.active);
+    if (!on) { this.followWait = null; this.trip = null; return; }
+    const s = activeSpace(), tab = s?.tabs.find(t => t.active);
+    this.watchTrip(tab);
+    // Something needs you again: not back yet.
+    if (now.size && this.trip) this.trip.clear = 0;
     if (this.followWait && tab?.id !== this.followWait) this.followWait = null;
     const fresh = [...now].some(([address, ms]) => seen.get(address) !== ms);
     const answered = [...seen.keys()].some(address => !now.has(address));
     if (!fresh && !answered && !this.followWait) return;
     const blocked = data.list.filter(a => now.has(a.address));
-    if (!blocked.length) { this.followWait = null; return; }
+    if (!blocked.length) {
+      this.followWait = null;
+      if (this.trip?.arrived && !this.trip.clear) this.trip.clear = Date.now();
+      return;
+    }
     if (tab && blocked.some(a => a.tab === tab.id)) { this.followWait = tab.id; return; }
     this.followWait = null;
     const next = blocked.sort((a, b) => (a.status_ms ?? 0) - (b.status_ms ?? 0) || a.address.localeCompare(b.address))[0];
+    // The first move remembers where you were; the moves after it keep that.
+    if (!this.trip && s && tab) this.trip = { home: { space: s.id, tab: tab.id } };
+    if (this.trip) Object.assign(this.trip, { to: next.tab, arrived: false, sent: Date.now(), clear: 0 });
     cx.spawn(async () => run("agent.focus", { terminal: next.address }));
+  }
+
+  // The tab follow's last move went to: arrived once it shows. Any other tab
+  // after that (or 3 s on, if the move never landed) is your own pick, so
+  // follow won't take you back.
+  watchTrip(tab) {
+    const trip = this.trip;
+    if (!trip) return;
+    if (tab && tab.id === trip.to) { trip.arrived = true; return; }
+    if (trip.arrived || Date.now() - trip.sent > 3000) this.trip = null;
+  }
+
+  // From the strip's 250 ms tick: FOLLOW_BACK_MS after the last agent that
+  // needed you was answered (and nothing needs you since), back to the tab you
+  // were on before follow's first move. You stay where you are when you've
+  // moved since, or when that tab has closed.
+  followBack() {
+    const trip = this.trip;
+    if (!trip?.clear || Date.now() - trip.clear < FOLLOW_BACK_MS) return;
+    if (readScene().list.some(a => a.status === "blocked" && !a.child && a.pane)) { trip.clear = 0; return; }
+    this.trip = null;
+    if (shared("ram.follow") !== true || level() !== "meta") return;
+    if (activeSpace()?.tabs.find(t => t.active)?.id !== trip.to) return;
+    const home = spaces().find(x => x.id === trip.home.space);
+    if (!home?.tabs.some(t => t.id === trip.home.tab)) return;
+    this.go(home.id, trip.home.tab);
   }
 
   goMeta() {
@@ -641,11 +687,6 @@ export default class Ram extends View {
       .child(div().text_size(12 * U).text_color(here ? AMBER : enabled ? t.foreground : t.dim).child(name));
     return h_flex().id("ram-levels").flex_none().gap(6 * U).items_center()
       .when(Boolean(prefix), el => el.child(div().text_size(11 * U).text_color(t.dim).child(prefix)))
-      // follow only means something in meta: lit while it's on.
-      .when(lvl === "meta", el => el.child(button("ram-follow", "follow", key("ram.follow"), shared("ram.follow") === true, true,
-        () => this.toggleFollow(), shared("ram.follow") === true
-          ? "follow is on: an agent that needs you is shown here (click to stop)"
-          : "follow: show each agent that needs you, one after another")).child(div().w(6 * U).flex_none()))
       .child(button("ram-level-meta", "meta", key("ram.meta"), lvl === "meta", true,
         () => this.goMeta(), "Meta: every space at once"))
       .child(button("ram-level-space", "space", key("ram.space"), lvl === "space", Boolean(s),
@@ -689,6 +730,20 @@ export default class Ram extends View {
       .hover(st => st.bg(t.hover).text_color(AMBER)).tooltip("New space")
       .on_mouse_down("left", stop)
       .on_click((_e, cx) => { cx.stop_propagation(); run("space.new"); }).child("+");
+  }
+
+  // follow's switch: a square under meta's + (follow only works in meta), its
+  // letter the key after ctrl-b, lit while it's on.
+  followButton(size = NEW_W) {
+    const t = theme(), on = shared("ram.follow") === true, k = shortcut("ram.follow");
+    const tip = (on ? "follow is on: each agent that needs you shows here, then your tab again (click to stop)"
+      : "follow: show each agent that needs you, then go back to your tab") + (k ? "  " + terse(k) : "");
+    return div().id("ram-follow").w(size).h(size).flex_none().flex().items_center().justify_center().rounded(2)
+      .border(1).border_color(on ? AMBER : t.input).when(on, el => el.bg(AMBER + "1f"))
+      .text_size(13 * U).font_semibold().text_color(on ? AMBER : t.muted).cursor_pointer()
+      .hover(st => st.bg(t.hover).text_color(AMBER)).tooltip(tip)
+      .on_mouse_down("left", stop)
+      .on_click((_e, cx) => { cx.stop_propagation(); this.toggleFollow(); }).child(this.key("ram.follow") || "f");
   }
 
   menu(spec, cx) {
@@ -1009,7 +1064,8 @@ export default class Ram extends View {
       .gap(REGION_GAP).px(16 * U).py(12 * U)
       .children(items.map(x => this.region(x.s, x.i, data, x.w, x.sum, regionH)))
       .when(!blocks.length, el => el.child(div().text_size(13 * U).text_color(t.muted).child("No regions yet: open a space to allocate one.")))
-      .child(this.newSpace());
+      // + (a new space) and, under it, follow's f: two squares as wide as NEW_W.
+      .child(v_flex().id("ram-stick-buttons").flex_none().gap(6 * U).child(this.newSpace()).child(this.followButton()));
     const scan = div().id("ram-scan").absolute().top(0).bottom(0).left(0).w(2 * U).bg("#7dff9b1f");
     if (this.motion()) scan.loop("left", { from: 0, to: Math.max(2, width - 2), period: 7000 });
     return this.sized(v_flex().id("ram-rams").relative().size_full().overflow_hidden())
@@ -1068,7 +1124,7 @@ export default class Ram extends View {
 
   // The strip, on top in every level: the current space's name, then its tabs
   // as one strip of chips (each closes with its own x) and + to push a new tab;
-  // the level buttons right (in meta with follow).
+  // the level buttons right.
   strip(data) {
     const t = theme(), width = this.size.width;
     const pl = inset(), s = data.spaces.find(x => x.active);
