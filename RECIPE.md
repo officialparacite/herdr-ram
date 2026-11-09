@@ -2,14 +2,12 @@
 
 The owner's exact setup; the `main` branch is the package to share.
 
-The window as a computer's memory, phosphor green on near-black with amber for
-whatever is current. A strip on top holds the space you're in and its tabs.
-Below it, three levels: **meta**, every space as a stick of RAM under the
-terminal with a main stick of all of them beside it; **space**, the space you
-work in with its stack of tabs, heap of agents, other machines and git; and
-**hunk**, a code review with the tab you came from as a strip below. lazygit
-and hunk open in tabs of their own, a `ctrl-b` key bar works in every layout,
-and Neovim switches to a matching theme while RAM shows.
+Work on many projects at once and see all of them on one screen. Each space is
+one project (a repo with its agents and terminals), drawn as a stick of RAM. The
+meta view lines every space up below your terminal, so one glance shows which
+agents are working, which need you (in red) and what changed in each repo. Click
+a stick to jump to that space. Two closer views: space, to work in one, and hunk,
+to review its diff. Comes with lazygit, a ctrl-b key bar and a Neovim theme.
 
 ![RAM](preview.png)
 

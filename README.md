@@ -5,14 +5,34 @@ This is the `private` branch: my exact setup, for my own machines. Its
 The `main` branch is the package for other people: it adds only the keys RAM
 needs, next to theirs, and follows Herdr's rules for shared layouts.
 
-A Herdr layout that draws the window as a computer's memory, in three levels.
-**meta** shows every space as a stick of RAM under the terminal, **space** is
-the space you work in (its stack of tabs, its agents, its git), and **hunk** is
-code review with [hunk](https://hunk.dev). lazygit and hunk are built in, a
-tmux-style `ctrl-b` key bar works in every layout, and a matching Neovim theme
-follows the layout.
+A Herdr layout for working on many projects at once. Each space is one project
+(a repo with its agents and terminals), drawn as a stick of RAM, and all of them
+fit on one screen. You see which agents are working, which need you and what
+changed in each repo without opening anything.
 
-![RAM](preview.png)
+![RAM's meta level](preview.png)
+
+## Three levels
+
+Press `ctrl-b` and then the level's key, or click its button on the strip at
+the top.
+
+- **meta** (`^b m`), above: every space as a stick below your terminal. A stick
+  shows the space's tabs, its agents (green working, red needs you) and its git
+  branch. The `@` stick on the left lists every space with the files changed in
+  each. Click a stick to jump to that space.
+- **space** (`^b i`): the space you work in, with its stack of tabs, heap of
+  agents, other machines and git.
+
+  ![RAM's space level](screenshots/space.png)
+
+- **hunk** (`^b r`): the space's diff, reviewed in [hunk](https://hunk.dev),
+  with the tab you came from as a strip below.
+
+  ![RAM's hunk level](screenshots/hunk.png)
+
+lazygit and hunk open in tabs of their own, the `ctrl-b` key bar works in every
+layout, and an optional Neovim theme follows the layout.
 
 ## What's in it
 
@@ -27,6 +47,7 @@ follows the layout.
 | `install.sh` | puts all of it in place on a machine, backing up what it replaces |
 | `nvim/` | my Herdr colorschemes (`herdr`, `herdr-ram`, `herdr-traveler`, `herdr-night-city`) and the switch that follows the layout (LazyVim) |
 | `tests/` | `verify.mjs`, checks that need no Herdr window, and `mutate.py` |
+| `preview.png`, `screenshots/` | pictures of the meta, space and hunk levels (the gallery shows `preview.png`) |
 | `RECIPE.md` | the brief to build RAM from scratch; an agent installs from it |
 
 ## Needs
