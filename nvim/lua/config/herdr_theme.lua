@@ -1,12 +1,13 @@
 -- Neovim follows the Herdr layout on screen: each layout below has its own
 -- colorscheme; any other layout uses the usual one (the colorscheme LazyVim
--- set: "herdr" from this folder, or Omarchy's theme on Omarchy). Another
--- layout's own scheme is one more line in BY_LAYOUT.
+-- set: "herdr" on the Mac, Omarchy's theme on Omarchy).
 -- Only inside a Herdr terminal (HC_TERMINAL_ID set) with herdr-app on PATH.
 -- Set up from lua/plugins/herdr.lua.
 local M = {}
 
 local BY_LAYOUT = {
+  traveler = "herdr-traveler",
+  ["night-city"] = "herdr-night-city",
   ram = "herdr-ram",
 }
 local OWN = {}

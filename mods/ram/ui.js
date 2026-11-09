@@ -45,7 +45,7 @@ export function identity(a) {
 }
 
 // The key bar's mod (its NAME): its keys are keys.json's mod:<BAR> section.
-export const BAR = "ram-prefix";
+export const BAR = "prefix";
 
 // The key that runs a command, from keys.json: a direct key, else the ctrl-b
 // prefix key then its second key ("ctrl-b :"). Empty when it has none.

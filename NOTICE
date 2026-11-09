@@ -18,11 +18,11 @@ parts from these projects:
   built-in spaces mod of Herdr (https://github.com/herdrdev/herdr-app,
   Apache License 2.0). This copy adds each changed file's line counts.
 
-- mods/ram-text-bigger and mods/ram-text-smaller change settings.json the way
-  Herdr's own Settings screen does (Herdr, Apache License 2.0).
+- mods/text-bigger and mods/text-smaller change settings.json the way Herdr's
+  own Settings screen does (Herdr, Apache License 2.0).
 
 Everything else (mods/ram/main.js, ui.js, all.js, hunk.js, arrow.svg,
-mods/ram-prefix, keys.json, layouts/, themes/, nvim/ and tests/) is new code.
+mods/prefix, keys.json, layouts/, themes/, nvim/ and tests/) is new code.
 
 ----------------------------------------------------------------------------
 Night City (vib-z/herdr-layouts):

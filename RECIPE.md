@@ -1,4 +1,6 @@
-# RAM
+# RAM (private)
+
+The owner's exact setup; the `main` branch is the package to share.
 
 The window as a computer's memory, phosphor green on near-black with amber for
 whatever is current. A strip on top holds the space you're in and its tabs.
@@ -131,54 +133,52 @@ and Neovim switches to a matching theme while RAM shows.
   quitting the program closes its tab), then labelled with `hc label`. It
   also runs `hc machine ls --json` every 15 s, `hc ls --all --json` and
   `hc read` (the peek strip). No mod opens a network connection.
-- `mods/ram-prefix` + `keys.json` (the bar's name is `NAME` in its main.js and
-  `BAR` in `mods/ram/ui.js`): `keys.json` holds only RAM's keys, merged into
-  the person's. `global` binds `ctrl-b` → `mod.open:ram-prefix` and ⌘+/⌘− →
-  `mod.open:ram-text-bigger` / `ram-text-smaller`. The keys after `ctrl-b`
-  are the `mod:ram-prefix` section, each `ram-prefix.<command>[:<first
-  argument>]`; they apply only while the bar is open. Herdr runs a bound key
-  as that binding, so it reaches the bar's `nextCommand()` as its action and
-  never its `on_key_down`. The bar runs it once and closes
+- `mods/prefix` + `keys.json` (the bar's name is `NAME` in its main.js and
+  `BAR` in `mods/ram/ui.js`): `global` binds `ctrl-b` → `mod.open:prefix`
+  and ⌘+/⌘− → `mod.open:text-bigger` / `text-smaller`. The second keys are the
+  `mod:prefix` section, each `prefix.<command>[:<first argument>]`; Herdr runs
+  a bound key as that binding, so it reaches the bar's `nextCommand()` as its
+  action and never its `on_key_down`. The bar runs it once and closes
   (`run(command, {<first arg name from commands()>: value})`, digits become
-  numbers). Extras: `ram-prefix.passthrough` (`hc keys <terminal> ctrl+b`),
-  `ram-prefix.worktree` (the shipped `worktree` dialog), `ram-prefix.lazygit`
+  numbers). Extras: `prefix.passthrough` (`hc keys <terminal> ctrl+b`),
+  `prefix.worktree` (the shipped `worktree` dialog), `prefix.lazygit`
   (`ram.git` in RAM, else a lazygit tab at the focused terminal's repo) and
-  `ram-prefix.navigate`, which maps each later action back to its key (`j` is
+  `prefix.navigate`, which maps each later action back to its key (`j` is
   `pane.go:down`). The bar's overlay is a frameless popup whose root is
   `w_full().h(4000).justify_end()`, so Herdr clips it to the window and the
   bar lands on the bottom edge.
-- `mods/ram-text-bigger`, `mods/ram-text-smaller`: empty frameless windows
-  that, on open, step `font_size` in settings.json (read, edit,
-  `writeTextFile` with the old text, up to 3 tries; a file that doesn't parse
-  is left alone) and close.
+- `mods/text-bigger`, `mods/text-smaller`: empty frameless windows that, on
+  open, step `font_size` in settings.json (read, edit, `writeTextFile` with
+  the old text, up to 3 tries; a file that doesn't parse is left alone) and
+  close.
 - `nvim/` (optional): described in README.md.
+
+**Install (for an agent):**
+
+This branch is the owner's exact setup for the owner's own machines (the
+`main` branch is the shared package). Here the owner's choice replaces Herdr's
+usual rules for someone else's layout: the keymap is replaced, not merged, and
+no keybind of the old one is kept; older copies of these mods are replaced, not
+renamed. `install.sh` does all of it and backs up what it replaces.
+
+1. Read every file first. Tell the person: RAM runs `git` (status, diff) in
+   their spaces' repos and, only when they press Commit, `git add -A` and
+   `git commit`; it runs `hunk session list`, `hc` and `herdr-app do`; nothing
+   reaches the network. lazygit and hunk need to be installed for `^b g` and
+   the hunk level.
+2. Run `./install.sh` from the clone, with `--nvim` if the person wants the
+   Neovim files (only on LazyVim; on Omarchy it skips `colorscheme.lua` and
+   `aether.lua`). It copies the layout, theme and mods (each moved into `mods/`
+   whole), replaces `keys.json` (without `ctrl-[` off macOS), checks each mod
+   and switches to RAM. Replaced files go to
+   `~/.config/herdr-app/.backup-ram-<time>/`.
+3. If `~/.config/herdr-app` is a git repo with an allowlist `.gitignore`, add
+   `!/mods/<name>/` for each new mod and commit only the new files.
+4. Confirm `herdr-app status` shows no errors with `ram` shown, and that
+   `RAM_HOME=~/.config/herdr-app node tests/verify.mjs` passes.
 
 **Watch out:**
 
-- Adding it: RAM runs `git` (status, diff) in the person's repos and, only
-  when they press Commit, `git add -A` and `git commit`; it also runs
-  `hunk session list`, `hc` and `herdr-app do tab.new`. Nothing reaches the
-  network. lazygit and hunk need to be installed for `^b g` and the hunk level.
-- The layout uses its own theme: copy `themes/ram.json` too.
-- Copy each mod folder next to `mods/` and move it in whole: Herdr docks a mod
-  folder it sees without its `mod.json` into the layout on screen and rewrites
-  that layout.
-- Put the mods in before merging `keys.json`: Herdr drops a `<mod>.<command>`
-  key whose mod folder isn't there when it loads the keys.
-- The keys: `ctrl-b` stops reaching programs directly (a shell's back one
-  character, less and vim's page up); `ctrl-b` `ctrl-b` sends it. ⌘+/⌘−
-  replace Herdr's zoom keys with the terminals' text size (`ctrl-b +`/`_`
-  still zoom); on Linux ⌘ is Super, which desktops often use. Ask before
-  replacing either. If the person keeps their `ctrl-b`, bind another key to
-  `mod.open:ram-prefix`; RAM shows whichever key opens the bar.
-- The mod names are prefixed `ram-` so they don't meet another layout's. A
-  rename has to change `NAME` in the bar's main.js, `BAR` in
-  `mods/ram/ui.js` and every key name in `keys.json`, or the bar loses its
-  keys.
-- RAM draws in its own colors (`mods/ram/ui.js`), not the person's theme.
-- `nvim/` is optional and only for LazyVim: ask first and never overwrite the
-  person's files. An existing `herdr_theme.lua` gets `ram = "herdr-ram",` in its
-  `BY_LAYOUT`; on Omarchy leave out `colorscheme.lua` and `aether.lua`.
 - Never test by driving a window someone is using: `^b` keys act on the
   focused pane, tab and space, and RAM's own resizes move their columns.
   `tests/verify.mjs` checks the mods with a stand-in for Herdr instead.

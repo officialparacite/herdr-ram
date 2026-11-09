@@ -1,17 +1,16 @@
 // tmux-style prefix (the Herdr TUI keymap from ~/.config/herdr/config.toml).
 //
-// keys.json binds ctrl-b to `mod.open:ram-prefix` (the mod's name is NAME below; a
-// copy under another name changes NAME, BAR in mods/ram/ui.js and its keys). This opens as a transparent, frameless
+// keys.json binds ctrl-b to `mod.open:prefix` (the mod's name is NAME below; a copy
+// under another name changes NAME and its keys). This opens as a transparent, frameless
 // layer over the whole window and draws a key bar along its bottom edge, so the bar
 // always sits at the bottom, full width.
 //
-// The second key is looked up in keys.json's "mod:ram-prefix" section, so every
-// prefix key shows in the keybinds screen and is edited in one place. Each action
-// there is "ram-prefix.<command>[:<first argument>]": Herdr hands it to nextCommand()
-// below, the bar closes, then the command runs. Extras: "ram-prefix.passthrough"
-// types ctrl-b into the focused terminal, "ram-prefix.worktree" opens the
-// new-worktree dialog, and "ram-prefix.navigate" (^b w) is the Herdr TUI's
-// navigate mode (below).
+// The second key is looked up in keys.json's "mod:prefix" section, so every prefix
+// key shows in the keybinds screen and is edited in one place. Each action there is
+// "prefix.<command>[:<first argument>]": Herdr hands it to nextCommand() below, the
+// bar closes, then the command runs. Extras: "prefix.passthrough" types ctrl-b
+// into the focused terminal, "prefix.worktree" opens the new-worktree dialog, and
+// "prefix.navigate" (^b w) is the Herdr TUI's navigate mode (below).
 // Esc, any other key, or a click outside the bar closes it at once; a key runs once.
 //
 // Navigate mode (^b w): pick a space in the layout's own list instead of a picker.
@@ -33,7 +32,7 @@ import { run, props, closeOverlay, openOverlay, nextCommand, keys, commands, foc
 
 // This mod's folder name: its keys.json section is mod:<NAME>, its actions <NAME>.<command>,
 // and the key that opens it mod.open:<NAME>. mods/ram/ui.js names it too (BAR).
-const NAME = "ram-prefix";
+const NAME = "prefix";
 const SECTION = `mod:${NAME}`, ACTION = `${NAME}.`;
 const NAV = "navigate.space";
 

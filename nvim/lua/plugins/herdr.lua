@@ -1,5 +1,7 @@
 -- Herdr colorschemes, drawn by aether.nvim (already installed):
 --   herdr             Herdr's graphite theme, for the main layout
+--   herdr-traveler    the Traveler layout's dusk colors, transparent
+--   herdr-night-city  the Night City layout's navy and gold, transparent
 --   herdr-ram         the RAM layout's phosphor green and amber, transparent
 -- The palettes live in lua/plugins/herdr/colors/. config/herdr_theme.lua
 -- switches to a layout's own scheme while Herdr shows it, and back after.

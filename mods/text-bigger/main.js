@@ -1,14 +1,14 @@
-// ⌘- (keys.json binds cmd-- to mod.open:ram-text-smaller): every terminal's text
-// one size smaller, the shell's, the agents', hunk's and lazygit's alike. The
-// panels (RAM's sticks, Traveler's lists) keep their size; ^b _ still zooms
-// everything out. mod.open shows this mod as an empty, frameless window, which
-// doesn't take the keyboard; it changes settings.json the way Settings → Look's
-// terminal font size does, then closes itself.
-// Its twin is mods/ram-text-bigger (⌘+): the same file but for STEP and its name.
+// ⌘+ (keys.json binds cmd-= and cmd-+ to mod.open:text-bigger): every
+// terminal's text one size bigger, the shell's, the agents', hunk's and
+// lazygit's alike. The panels (RAM's sticks, Traveler's lists) keep their size;
+// ^b + still zooms everything. mod.open shows this mod as an empty, frameless
+// window, which doesn't take the keyboard; it changes settings.json the way
+// Settings → Look's terminal font size does, then closes itself.
+// Its twin is mods/text-smaller (⌘-): the same file but for STEP and its name.
 import { View, div } from "gpui-kit";
 import { props, closeOverlay, appHome, readTextFile, writeTextFile } from "herdr";
 
-const STEP = -1;
+const STEP = 1;
 // Settings → Look's range for the terminal font, and Herdr's size when
 // settings.json names none.
 const MIN = 8, MAX = 32, DEFAULT = 14;
@@ -37,7 +37,7 @@ export async function step(by = STEP) {
   return null;
 }
 
-export default class TextSmaller extends View {
+export default class TextBigger extends View {
   init(_props, cx) {
     // Only when its key opened it (not, say, under herdr-app check).
     const overlay = props()?.overlay;
