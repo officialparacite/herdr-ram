@@ -159,18 +159,35 @@ const blockText = a => a.status === "dead" ? "freed" : a.status === "unavailable
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
 // The tools RAM opens in a tab of their own, at the space's repo top: lazygit
-// (GIT's click, ctrl-b g) and hunk's reviews (hunk.js). Herdr starts them in the
-// login shell; `exec` makes quitting them close the tab. RAM labels their
-// terminals (ram.lazygit, ram.hunk).
+// (GIT's click, ctrl-b g), rg-fzf (the space level's / rg-fzf button, ctrl-b /)
+// and hunk's reviews (hunk.js). Herdr starts them in the login shell; `exec`
+// makes quitting them close the tab. RAM labels their terminals (ram.lazygit,
+// ram.hunk); rg-fzf's labels itself (OWN).
+// rg-fzf's tab, as sh: while rg-fzf runs the tab is labelled ram.rg (a tool's).
+// What you pick (Enter: the files, ctrl-o: the lines, alt-enter: JSON) stays
+// printed and the tab turns into your shell, a tab like any other; Esc (nothing
+// picked) closes the tab. If rg-fzf can't run, its error stays, in that shell.
+// The key bar (ui.js's BAR) has the same script, RG_TAB, for other layouts.
+export const RG_TAB = [
+  '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" ram.rg=1 >/dev/null 2>&1',
+  'out=$(rg-fzf); st=$?',
+  '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" ram.rg= >/dev/null 2>&1',
+  '[ -z "$out" ] && [ "$st" -eq 0 ] && exit 0',
+  '[ -n "$out" ] && printf "%s\\n" "$out"',
+  'exec "${SHELL:-/bin/sh}" -il',
+].join("\n");
+// REPO: it needs the space's repo (rg-fzf searches the repo, else the folder you're in).
 const TOOLS = {
-  lazygit: { name: "lazygit", argv: ["exec", "lazygit"], label: "ram.lazygit" },
+  lazygit: { name: "lazygit", argv: ["exec", "lazygit"], label: "ram.lazygit", repo: true },
+  rg: { name: "rg-fzf", argv: ["exec", "sh", "-c", RG_TAB], label: "ram.rg", repo: false, own: true },
 };
 const labelled = label => new Set(terminals().filter(t => t.labels?.[label]).map(t => t.address));
 const runsIn = (tabId, addresses) => panes().some(p => p.tab === tabId && p.terminal && addresses.has(p.terminal));
 const isLazygitTab = (tabId, lazygit = labelled(TOOLS.lazygit.label)) => runsIn(tabId, lazygit);
+const isRgTab = (tabId, rg = labelled(TOOLS.rg.label)) => runsIn(tabId, rg);
 const isHunkTab = (tabId, reviews = labelled(HUNK_LABEL)) => runsIn(tabId, reviews);
 // A tab RAM opened for a tool (not one of the space's own tabs).
-const isToolTab = tabId => isLazygitTab(tabId) || isHunkTab(tabId);
+const isToolTab = tabId => isLazygitTab(tabId) || isHunkTab(tabId) || isRgTab(tabId);
 const activeSpace = () => spaces().find(s => s.active);
 // Room on the left for macOS's window buttons. They sit at the layout's
 // traffic_lights spot in screen points and don't grow with zoom, so this is
@@ -264,8 +281,9 @@ export default class Ram extends View {
     });
     // Commands for keys or the CLI: ram.meta (every space; again: back into
     // the space), ram.space, ram.hunk (a review: the space's last one, else
-    // the menu; again: back), ram.git (lazygit), ram.follow (meta's follow on
-    // or off), ram.changes (the main stick's view), ram.zoom, ram.back.
+    // the menu; again: back), ram.git (lazygit), ram.rg (rg-fzf), ram.follow
+    // (meta's follow on or off), ram.changes (the main stick's view), ram.zoom,
+    // ram.back.
     cx.spawn(async cx => {
       for (;;) {
         const c = await nextCommand();
@@ -275,6 +293,7 @@ export default class Ram extends View {
         } else if (c === "space") this.enter(s?.id);
         else if (c === "hunk" && s) this.goHunk(s);
         else if (c === "git" && s) this.openLazygit(s, cx);
+        else if (c === "rg" && s) this.openRg(s, cx);
         else if (c === "follow") this.toggleFollow();
         else if (c === "changes") {
           // The main stick's changes view; outside meta, meta with it.
@@ -438,18 +457,24 @@ export default class Ram extends View {
   }
 
   // A tool's tab in a space (TOOLS): select it, or open the tool in a new tab
-  // at the space's repo top, named after it and labelled for RAM. Without a
-  // repo, a toast says so (and nothing else changes).
+  // at the space's repo top (rg-fzf: else the folder of the tab you're in),
+  // named after it and labelled for RAM. Nowhere to open it: a toast says so
+  // (and nothing else changes).
   openTool(s, cx, kind) {
     const tool = TOOLS[kind];
-    const open = s.tabs.find(t => isLazygitTab(t.id));
+    const mine = labelled(tool.label);
+    const open = s.tabs.find(t => runsIn(t.id, mine));
     const g = open ? null : this.gitInfo?.info(s, panes());
-    if (!open && !g) { this.noRepo(s, g, tool); return; }
+    const top = g?.top || (tool.repo ? "" : this.gitInfo?.folders(s, panes())[0] || s.folder || "");
+    if (!open && !top) {
+      if (tool.repo) this.noRepo(s, g, tool);
+      else notify({ title: `Nowhere for ${tool.name}`, body: `${s.name} has no folder to search yet.`, level: "info", timeout: 4000 });
+      return;
+    }
     this.rememberWork(s);
     setShared("ram.zoom", "space");
     if (open) { run("tab.select", { id: open.id }); return; }
-    const top = g.top;
-    if (!top || opening()) return;
+    if (opening()) return;
     setShared("ram.opening", { space: s.id, at: Date.now() });
     cx.spawn(async cx => {
       const fail = body => notify({ title: `Couldn't open ${tool.name}`, body, level: "error" });
@@ -459,7 +484,7 @@ export default class Ram extends View {
         let made = {};
         try { made = JSON.parse(r.stdout || "{}"); } catch (_) { made = {}; }
         if (r.code !== 0 || made.error || !made.terminal) fail(made.error || r.stderr.trim() || "herdr-app do tab.new failed");
-        else await hc(["label", made.terminal, `${tool.label}=1`]);
+        else if (!tool.own) await hc(["label", made.terminal, `${tool.label}=1`]);
       } catch (e) { fail(String(e?.message ?? e)); }
       setShared("ram.opening", null);
       cx.notify();
@@ -467,6 +492,8 @@ export default class Ram extends View {
   }
 
   openLazygit(s, cx) { this.openTool(s, cx, "lazygit"); }
+
+  openRg(s, cx) { this.openTool(s, cx, "rg"); }
 
   // ---------------------------------------------------------------- hunk (hunk.js)
 
@@ -716,6 +743,21 @@ export default class Ram extends View {
       .hover(st => st.bg(t.hover).text_color(AMBER))
       .on_mouse_down("left", stop)
       .on_click((_e, cx) => { cx.stop_propagation(); action(cx); }).child(label);
+  }
+
+  // rg-fzf's button for space S, drawn as meta's d diff: its ^b key in amber,
+  // then "rg-fzf"; lit while its rg-fzf tab is the one shown.
+  rgButton(s) {
+    const t = theme(), shown = s.tabs.find(x => x.active), on = Boolean(shown && isRgTab(shown.id));
+    const k = this.key("rg"), full = shortcut("rg");
+    return h_flex().id("ram-rg").h(15 * U).px(5 * U).gap(4 * U).flex_none().items_center().rounded(2)
+      .border(1).border_color(on ? AMBER : t.input).when(on, el => el.bg(AMBER + "1f"))
+      .cursor_pointer().hover(st => st.bg(t.hover))
+      .tooltip(on ? "rg-fzf is open: Esc closes its tab" : `rg-fzf: search ${s.name}${full ? "  " + terse(full) : ""}`)
+      .on_mouse_down("left", stop)
+      .on_click((_e, cx) => { cx.stop_propagation(); this.openRg(s, cx); })
+      .children(k ? [div().text_size(10 * U).font_semibold().text_color(AMBER).child(k)] : [])
+      .child(div().text_size(10 * U).text_color(on ? AMBER : t.muted).child("rg-fzf"));
   }
 
   windowButtons() {
@@ -1094,8 +1136,8 @@ export default class Ram extends View {
   // it there; right-click is the tab menu.
   tabChip(s, f, data) {
     const t = theme(), here = f.active, tab = s.tabs.find(x => x.id === f.id);
-    const toolTab = isLazygitTab(f.id);
-    const name = toolTab ? "lazygit" : tab?.named ? tab.name : (f.windows.map(blockText).join(" \u00b7 ") || "empty");
+    const toolTab = isLazygitTab(f.id) || isRgTab(f.id);
+    const name = isLazygitTab(f.id) ? "lazygit" : tab?.named ? tab.name : (f.windows.map(blockText).join(" \u00b7 ") || "empty");
     const list = data.list.filter(a => a.space === s.id && a.tab === f.id);
     const blocked = list.filter(a => a.status === "blocked").length;
     const chip = h_flex().id(`tabchip-${f.id}`).relative().w(CHIP_W).h(CHIP_H).pl(7 * U).pr(3 * U).gap(5 * U).flex_none().items_center().rounded(2).overflow_hidden()
@@ -1166,8 +1208,11 @@ export default class Ram extends View {
     const label = (text, extra = []) => h_flex().h(20 * U).flex_none().px(10 * U).gap(5 * U).items_center()
       .child(div().flex_1().text_size(10.5 * U).text_color(t.dim).child(text)).children(extra);
     const count = n => n ? "  " + n : "";
+    // The space level's top row: rg-fzf's button (as meta's main stick has d diff)
+    // before the +, for the space you're in.
     const stackLabel = label(`STACK \u2193${count(data.spaces.length)}`,
-      [this.mini("ram-space-new", "+", "Push: new space", () => run("space.new"))]);
+      [...(lvl === "space" && s ? [this.rgButton(s)] : []),
+        this.mini("ram-space-new", "+", "Push: new space", () => run("space.new"))]);
     if (!s) return this.sized(shell).child(stackLabel)
       .child(div().flex_1().px(10 * U).py(6 * U).text_size(13 * U).text_color(t.muted).child("No space yet"))
       .child(this.machinesRegion(compact)).child(this.keysRow(compact));

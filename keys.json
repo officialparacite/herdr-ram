@@ -43,6 +43,7 @@
     "i": "prefix.ram.space",
     "r": "prefix.ram.hunk",
     "g": "prefix.lazygit",
+    "/": "prefix.rg",
     "f": "prefix.ram.follow",
     "d": "prefix.ram.changes",
     "h": "prefix.pane.go:left",

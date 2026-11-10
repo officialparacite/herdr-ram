@@ -31,8 +31,8 @@ the top.
 
   ![RAM's hunk level](screenshots/hunk.png)
 
-lazygit and hunk open in tabs of their own, the `ctrl-b` key bar works in every
-layout, and an optional Neovim theme follows the layout.
+lazygit, rg-fzf and hunk open in tabs of their own, the `ctrl-b` key bar works
+in every layout, and an optional Neovim theme follows the layout.
 
 ## What's in it
 
@@ -41,7 +41,7 @@ layout, and an optional Neovim theme follows the layout.
 | `layouts/ram.json`, `layouts/ram.svg` | the layout, and the picture Settings shows for it |
 | `themes/ram.json` | phosphor green on near-black, amber for the current thing |
 | `mods/ram/` | the layout's one mod: the strip, the side column, the sticks, hunk |
-| `mods/prefix/` | the `ctrl-b` key bar, in every layout (with `^b w` navigate mode and `^b g` lazygit) |
+| `mods/prefix/` | the `ctrl-b` key bar, in every layout (with `^b w` navigate mode, `^b g` lazygit and `^b /` rg-fzf) |
 | `mods/text-bigger/`, `mods/text-smaller/` | ⌘+ and ⌘−: the terminals' text a size bigger or smaller |
 | `keys.json` | my whole keymap: the `ctrl-b` keys, ⌘+/⌘−, and my terminal keys |
 | `install.sh` | puts all of it in place on a machine, backing up what it replaces |
@@ -56,6 +56,8 @@ layout, and an optional Neovim theme follows the layout.
   Tested on 0.1.14 on macOS.
 - git. [lazygit](https://github.com/jesseduffield/lazygit) for `^b g` and the GIT
   lines, [hunk](https://hunk.dev) for the hunk level: `brew install lazygit hunk`.
+- [rg-fzf](https://github.com/officialparacite/rg-fzf) for `^b /` and the space
+  level's `rg-fzf` button (it needs rg, fzf, bat and jq).
 - Optional: Neovim with LazyVim for the theme.
 
 ## Install on one of my machines
@@ -108,6 +110,7 @@ them; Esc, any other key or a click closes it.
 | Panes | `h` `j` `k` `l` focus · `H` `J` `K` `L` swap · `v` split right · `-` split down · `x` close · `z` zoom |
 | Agents | `a` / `A` next / previous |
 | Git | `g` lazygit at the repo you're in |
+| Search | `/` rg-fzf at the repo you're in (else its folder) |
 | Levels (RAM) | `m` meta · `i` space · `r` hunk · `f` follow (meta) · `d` diff (meta's main stick) |
 | App | `:` palette · `?` all keys · `s` settings · `b` sidebar · `space` next layout · `+` / `_` / `0` zoom in / out / reset · `ctrl-b` sends `ctrl-b` to the program |
 
@@ -127,12 +130,18 @@ mode on macOS).
 Every key is in `keys.json` (`mod:prefix` holds the second keys) and shows in
 Herdr's keybinds screen.
 
-## lazygit and hunk
+## lazygit, rg-fzf and hunk
 
 - `^b g`, or a click on a GIT line, opens lazygit in a tab of its own at the
   space's repo (the shown tab's folder, else another tab's). Quitting lazygit
   closes the tab and takes you back. In other layouts `^b g` opens it at the
   focused terminal's repo.
+- `^b /`, or the `/ rg-fzf` button at the top of the space level's column,
+  opens rg-fzf in a tab of its own at the space's repo (no repo: the folder
+  you're in). It works as it does on its own: Enter prints the files you
+  picked, `ctrl-o` the lines, `alt-enter` JSON, and then the tab is your shell,
+  with that output above the prompt. Esc closes the tab and takes you back. In
+  other layouts `^b /` opens it at the focused terminal's repo.
 - `^b r`, or the `r hunk` button, opens the space's last review, else a menu:
   `hunk diff` and `diff --staged` (live, `--watch`), `show`, `log`,
   `stash show`, `status`, with an optional ref. Each review is a tab of its own

@@ -6,8 +6,9 @@ Work on many projects at once and see all of them on one screen. Each space is
 one project (a repo with its agents and terminals), drawn as a stick of RAM. The
 meta view lines every space up below your terminal, so one glance shows which
 agents are working, which need you (in red) and what changed in each repo. Click
-a stick to jump to that space. Two closer views: space, to work in one, and hunk,
-to review its diff. Comes with lazygit, a ctrl-b key bar and a Neovim theme.
+a stick to jump to that space. Two closer views: space, to work in one, and
+hunk, to review its diff. Comes with lazygit, rg-fzf, a ctrl-b key bar and a
+Neovim theme.
 
 ![RAM](preview.png)
 
@@ -54,7 +55,8 @@ to review its diff. Comes with lazygit, a ctrl-b key bar and a Neovim theme.
   their `^b` keys.
 - **space:** the terminal fills the rest. The side column has STACK (every
   space from `0x01` down, `◂SP` on the one you're in, `@machine`, FAULT,
-  `◆n`, `+` for a new space), HEAP (this space's agents, the oldest at the
+  `◆n`, and on its label row a `/ rg-fzf` button, drawn as meta's `d diff`, then
+  `+` for a new space), HEAP (this space's agents, the oldest at the
   bottom), `.rodata`, GIT (`repo · branch`, marks, changed files) and the keys
   row, which never gets cut off; lists that don't fit end in `+n more`.
 - **hunk:** the review fills the terminal block, the side column lists the
@@ -86,7 +88,8 @@ to review its diff. Comes with lazygit, a ctrl-b key bar and a Neovim theme.
   once you answer the last one, go straight back to the tab you were on
   before its first move, unless that tab closed or you picked another; an
   agent that asks again is shown again at once), `^b d` the main
-  stick's diff view (from another level: meta with diff), `^b g` lazygit.
+  stick's diff view (from another level: meta with diff), `^b g` lazygit,
+  `^b /` rg-fzf.
 - `^b w` navigate mode, each move shown at once: the bar shows one row
   (`navigate`, the space's name, `@machine`, `i of n`, `tab n` and its name,
   `i of n`); `j`/down and `k`/up the next and previous space, `h`/left and
@@ -95,6 +98,14 @@ to review its diff. Comes with lazygit, a ctrl-b key bar and a Neovim theme.
   outside the bar stays; Esc goes back to the space, tab and pane it started
   on (those still there). RAM outlines that space in cyan in every list of
   spaces.
+- rg-fzf: the `/ rg-fzf` button or `^b /` opens it in a tab named `rg-fzf` at
+  the space's repo (no repo: the shown tab's folder), or shows the one already
+  open. The tab runs `sh -c` with a short script: it labels its terminal
+  `ram.rg`, runs `out=$(rg-fzf)`, removes the label, closes the tab when
+  nothing was printed and rg-fzf exited 0 (Esc), else prints the output and
+  `exec`s the user's shell (`$SHELL -il`), so the tab carries on as a plain
+  one. While labelled it's a tool's tab (the button lit, its chip cyan, not the
+  space's work tab), and when it closes RAM shows the tab you came from.
 - lazygit: a GIT line, a stick's git line or `^b g` opens it in a tab at the
   space's repo (the shown tab's folder, else another tab's); quitting it
   closes the tab and RAM shows the tab you came from. No repo: GIT says "not a
@@ -135,9 +146,10 @@ to review its diff. Comes with lazygit, a ctrl-b key bar and a Neovim theme.
 - Commands: `tab.select`, `space.select`, `tab.move`, `space.move`,
   `tab.close`, `tab.rename`, `space.rename`, `space.new`, `agent.focus`,
   `layout.resize`, `layout.show`, `layout.hide`, `mod.open` (machine-add);
-  `setAgentOrder()` on every render. lazygit and hunk tabs are made with
-  `herdr-app do tab.new --space --name --folder --argv '["exec", ...]'` (so
-  quitting the program closes its tab), then labelled with `hc label`. It
+  `setAgentOrder()` on every render. lazygit, rg-fzf and hunk tabs are made
+  with `herdr-app do tab.new --space --name --folder --argv '["exec", ...]'`
+  (so quitting the program closes its tab), then labelled with `hc label`
+  (rg-fzf's script labels its own). It
   also runs `hc machine ls --json` every 15 s, `hc ls --all --json` and
   `hc read` (the peek strip). No mod opens a network connection.
 - `mods/prefix` + `keys.json` (the bar's name is `NAME` in its main.js and
@@ -149,7 +161,9 @@ to review its diff. Comes with lazygit, a ctrl-b key bar and a Neovim theme.
   (`run(command, {<first arg name from commands()>: value})`, digits become
   numbers). Extras: `prefix.passthrough` (`hc keys <terminal> ctrl+b`),
   `prefix.worktree` (the shipped `worktree` dialog), `prefix.lazygit`
-  (`ram.git` in RAM, else a lazygit tab at the focused terminal's repo) and
+  (`ram.git` in RAM, else a lazygit tab at the focused terminal's repo),
+  `prefix.rg` (`ram.rg` in RAM, else an rg-fzf tab at that repo or folder,
+  with the same script as RAM's, `RG_TAB`) and
   `prefix.navigate`, which maps each later action back to its key (`j` is
   `pane.go:down`). The bar's overlay is a frameless popup whose root is
   `w_full().h(4000).justify_end()`, so Herdr clips it to the window and the
@@ -172,7 +186,7 @@ renamed. `install.sh` does all of it and backs up what it replaces.
    their spaces' repos and, only when they press Commit, `git add -A` and
    `git commit`; it runs `hunk session list`, `hc` and `herdr-app do`; nothing
    reaches the network. lazygit and hunk need to be installed for `^b g` and
-   the hunk level.
+   the hunk level, and rg-fzf (with rg, fzf, bat, jq) for `^b /`.
 2. Run `./install.sh` from the clone, with `--nvim` if the person wants the
    Neovim files (only on LazyVim; on Omarchy it skips `colorscheme.lua` and
    `aether.lua`). It copies the layout, theme and mods (each moved into `mods/`
@@ -220,6 +234,8 @@ renamed. `install.sh` does all of it and backs up what it replaces.
   and GIT beside it; `^b r` in a repo opens the review menu and a review in a
   tab of its own, and `^b r` again goes back.
 - `^b g` opens lazygit at the space's repo and quitting it closes its tab.
+- `^b /` opens rg-fzf at the space's repo; Enter leaves the picked files
+  printed in a shell tab, and Esc closes the tab.
 - `^b w`, `j` shows the next space at once, with a cyan outline on it while
   navigating; `l` shows its next tab, `L` the pane to the right, and Esc goes
   back to where you started.

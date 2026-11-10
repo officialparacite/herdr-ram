@@ -182,9 +182,9 @@ const stub = url(`
     // The main stick's diff and commit box.
     if (command === "git" && args.includes("diff") && args.includes("--")) return { code: 0, stdout: host.diffText ?? "", stderr: "" };
     if (command === "git" && (args[0] === "add" || args[0] === "commit")) return { code: host.commitCode ?? 0, stdout: "", stderr: host.commitErr ?? "" };
-    // Folders under /repo/ are repos, for the key bar's lazygit outside RAM.
+    // Folders under /repo/<name> are in that repo, for the key bar's lazygit and rg-fzf outside RAM.
     if (command === "git" && args[0] === "rev-parse" && args[1] === "--show-toplevel" && opts?.cwd?.startsWith("/repo/"))
-      return { code: 0, stdout: opts.cwd + "\\n", stderr: "" };
+      return { code: 0, stdout: opts.cwd.split("/").slice(0, 3).join("/") + "\\n", stderr: "" };
     return { code: 1, stdout: "", stderr: "fatal: not a git repository" }; };
 `);
 const swap = src => src.replaceAll('"gpui-kit"', JSON.stringify(stub)).replaceAll('"gpui-base"', JSON.stringify(stub)).replaceAll('"herdr"', JSON.stringify(stub));
@@ -203,7 +203,7 @@ async function load(path) {
   return u;
 }
 const gitURL = await load("mods/ram/git.js");
-const { default: Ram, LEVELS, level, sideWidth, fitBlocks } = await import(await load("mods/ram/main.js"));
+const { default: Ram, LEVELS, level, sideWidth, fitBlocks, RG_TAB } = await import(await load("mods/ram/main.js"));
 // Spawned tasks run at once; settle() lets their awaits finish. (Some never end,
 // like the command loop waiting on nextCommand, so they can't be awaited.)
 const cx = { timer: { every: (ms, fn) => host.timers.push({ ms, fn }), after: () => {} }, notify() {},
@@ -1251,6 +1251,103 @@ spaces[0].folder = "/repo/unchecked";
 await send("git");
 assert.equal(host.notes.at(-1)?.title, "Checking git", "not looked at yet: try again in a moment");
 spaces[0].folder = "/repo/api";
+
+// ---- ^b /: rg-fzf in a tab of its own (the space level's rg-fzf button) --------------------
+assert.equal(keysFile[`mod:${BAR}`]["/"], `${BAR}.rg`, "^b / is bound in every layout (the key bar sends RAM's to ram.rg)");
+{
+  const rgArgv = JSON.stringify(["exec", "sh", "-c", RG_TAB]);
+  const rgOpen = (space, folder) => ({ command: "herdr-app", args: ["do", "tab.new", "--space", space, "--name", "rg-fzf",
+    "--folder", folder, "--argv", rgArgv], opts: undefined });
+  host.shared.set("ram.zoom", "space");
+  side.gitInfo.git[JSON.stringify([null, "/repo/api"])] ??= cmdMap.gitInfo.git[JSON.stringify([null, "/repo/api"])];
+  let st = R(side, { role: "side" });
+  const rgb = withId(st, "ram-rg");
+  assert(rgb, "the space level's top row has rg-fzf's button");
+  assert.deepEqual(textOf(rgb), ["/", "rg-fzf"], "its key, then rg-fzf, as meta's d diff");
+  assert.equal(op(rgb, "tooltip")[0], "rg-fzf: search api  ^b /");
+  const row = flatten(st).find(n => n.kids.includes(rgb));
+  assert.deepEqual(row.kids.slice(1).map(idOf), ["ram-rg", "ram-space-new"], "STACK's row: rg-fzf, then +");
+  assert(!op(rgb, "bg"), "not lit: no rg-fzf tab shows");
+  // A click opens it at the space's repo top. Its script labels the tab, so RAM doesn't.
+  host.execs = []; host.hcs = []; host.notes = [];
+  click(st, "ram-rg"); await settle();
+  assert.deepEqual(host.execs.at(-1), rgOpen("s0", "/repo/api"));
+  assert.deepEqual(host.hcs, [], "no hc label from RAM");
+  assert.deepEqual([host.shared.get("ram.zoom"), host.shared.get("ram.opening")], ["space", null]);
+  // ram.rg (^b / in RAM) does the same, from any level.
+  host.execs = []; host.shared.set("ram.zoom", "meta");
+  await send("rg");
+  assert.deepEqual(host.execs.at(-1), rgOpen("s0", "/repo/api"), "^b / opens it as the button does");
+  assert.equal(host.shared.get("ram.zoom"), "space", "and shows the space level");
+  // Not a repo: the folder of the tab you're in (rg-fzf needs no git); nothing at all: a toast.
+  spaces[0].folder = "/home/tester/notes"; side.gitInfo.git[JSON.stringify([null, "/home/tester/notes"])] = null;
+  host.execs = [];
+  click(R(side, { role: "side" }), "ram-rg"); await settle();
+  assert.deepEqual(host.execs.at(-1), rgOpen("s0", "/home/tester/notes"), "not a repo: that folder");
+  assert.equal(host.notes.length, 0, "no toast for that");
+  spaces[0].folder = ""; host.execs = [];
+  click(R(side, { role: "side" }), "ram-rg"); await settle();
+  assert.deepEqual([host.execs.length, host.notes.at(-1)?.title], [0, "Nowhere for rg-fzf"]);
+  spaces[0].folder = "/repo/api"; host.notes = [];
+  // While rg-fzf runs (its terminal labelled ram.rg) its tab is a tool's: the button and
+  // its strip chip light up, the button shows it again, and it isn't the space's work tab.
+  spaces[0].tabs.push({ id: "tabRG", name: "rg-fzf", named: true, index: 3, active: false, settled: false, status: null });
+  panes.push({ pane: "pRG", terminal: "tRG", tab: "tabRG", title: "rg-fzf", status: null, focused: true, program: { name: "fzf" } });
+  raw.push({ address: "tRG", state: "live", created_ms: 9600, labels: { "ram.rg": "1" } });
+  spaces[0].tabs.forEach(t => t.active = t.id === "tabRG");
+  R(map, {}); await settle();
+  st = R(side, { role: "side" });
+  assert.deepEqual(op(withId(st, "ram-rg"), "border_color"), ["#ffb547"], "lit while its tab shows");
+  assert.equal(op(withId(st, "ram-rg"), "tooltip")[0], "rg-fzf is open: Esc closes its tab");
+  const chip = withId(R(map, {}), "tabchip-tabRG");
+  assert(flatten(chip).some(n => n.kids.includes("rg-fzf") && op(n, "text_color")?.[0] === "#6fe3d3"), "its chip: rg-fzf, in cyan");
+  assert.equal(host.shared.get("ram.from").s0, "tab0-0", "not remembered as the work tab");
+  host.execs = []; host.calls = [];
+  click(st, "ram-rg"); await settle();
+  assert.deepEqual([host.execs.length, host.calls.at(-1)], [0, { name: "tab.select", args: { id: "tabRG" } }], "one open: show it");
+  // Esc in rg-fzf ends the tab: RAM shows the tab you came from.
+  spaces[0].tabs.pop(); panes.pop();
+  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-1");
+  host.calls = [];
+  R(map, {}); await settle();
+  assert(host.calls.some(c => c.name === "tab.select" && c.args.id === "tab0-0"), "Esc: back to the tab before rg-fzf");
+  // What you pick stays printed and the tab turns into a shell like any other (the label
+  // goes): no longer a tool's, so it can be the work tab, and the button isn't lit.
+  spaces[0].tabs.push({ id: "tabRG", name: "rg-fzf", named: true, index: 3, active: true, settled: false, status: null });
+  panes.push({ pane: "pRG", terminal: "tRG", tab: "tabRG", title: "zsh", status: null, focused: true, program: { name: "zsh" } });
+  raw.at(-1).labels = {};
+  spaces[0].tabs.forEach(t => t.active = t.id === "tabRG");
+  R(map, {}); await settle();
+  assert(!op(withId(R(side, { role: "side" }), "ram-rg"), "bg"), "a plain tab now");
+  assert.equal(host.shared.get("ram.from").s0, "tabRG", "the work tab");
+  spaces[0].tabs.pop(); panes.pop(); raw.pop();
+  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");
+  host.shared.set("ram.from", { s0: "tab0-0" });
+  R(map, {}); await settle();
+  // Only the space level has the button (hunk's column is the reviews'; meta's the main stick).
+  host.shared.set("ram.zoom", "meta");
+  assert(!withId(R(side, { role: "side" }), "ram-rg"), "not in meta");
+  host.shared.set("ram.zoom", "space");
+  spaces[0].tabs.push({ id: "tabHK", name: "hunk diff", named: true, index: 3, active: false, settled: false, status: null });
+  panes.push({ pane: "pHK", terminal: "tHK", tab: "tabHK", title: "hunk", status: null, focused: true, program: { name: "hunk" } });
+  raw.push({ address: "tHK", state: "live", created_ms: 9700, labels: { "ram.hunk": "diff" } });
+  spaces[0].tabs.forEach(t => t.active = t.id === "tabHK");
+  assert.equal(level(), "hunk");
+  st = R(side, { role: "side" });
+  assert(withId(st, "ram-space-new") && !withId(st, "ram-rg"), "not in the hunk level's STACK row");
+  spaces[0].tabs.pop(); panes.pop(); raw.pop();
+  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");
+  // The script: it labels its tab while rg-fzf runs and unlabels it after; Esc (nothing
+  // printed, exit 0) ends the tab; else what was picked is printed and a shell starts.
+  assert.deepEqual(RG_TAB.split("\n"), [
+    '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" ram.rg=1 >/dev/null 2>&1',
+    'out=$(rg-fzf); st=$?',
+    '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" ram.rg= >/dev/null 2>&1',
+    '[ -z "$out" ] && [ "$st" -eq 0 ] && exit 0',
+    '[ -n "$out" ] && printf "%s\\n" "$out"',
+    'exec "${SHELL:-/bin/sh}" -il']);
+}
+console.log("PASS: ^b / and the space level's rg-fzf button: rg-fzf in a tab at the repo (else the folder), lit while it runs; Esc closes it and you're back; a pick stays printed in a plain shell tab");
 // The space's repo: the shown tab's folder (its focused terminal first), else another tab's.
 const { Git } = await import(gitURL);
 const gi = new Git(), K = d => JSON.stringify([null, d]);
@@ -1819,8 +1916,39 @@ host.shared.set("layout", "ram"); host.calls = [];
 const bar3 = new prefixMod.default(); bar3.init({}, cx2);
 bar3.finish("lazygit", cx2);
 assert.deepEqual(host.calls.at(-1), { name: "ram.git", args: {} }, "in RAM, RAM opens it (its own repo choice)");
+// ^b / the same way: rg-fzf in a new tab at the repo of the terminal you're in (else its
+// folder), with RAM's script; in RAM, RAM's ram.rg.
+assert.equal(prefixMod.RG_TAB, RG_TAB, "the key bar's rg-fzf script is RAM's");
+host.shared.set("layout", "traveler");
+host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", cwd: "/repo/api" };
+host.calls = []; host.closed = [];
+const bar6 = new prefixMod.default(); host.props = { overlay: "o11" }; bar6.init({}, cx2);
+bar6.finish("rg", cx2);
+await settle();
+assert.deepEqual(host.calls.at(-1), { name: "tab.new", args: { space: "s0", name: "rg-fzf", folder: "/repo/api",
+  argv: ["exec", "sh", "-c", RG_TAB] } });
+assert.deepEqual(host.closed, ["o11"], "then the bar closes");
+host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", cwd: "/repo/api/src" };
+host.calls = [];
+await prefixMod.rgHere();
+assert.equal(host.calls.at(-1)?.args.folder, "/repo/api", "in a repo's subfolder: the repo's top");
+host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", cwd: "/home/tester/notes" };
+host.calls = [];
+await prefixMod.rgHere();
+assert.equal(host.calls.at(-1)?.args.folder, "/home/tester/notes", "not a repo: that folder");
+// The key's other way in (finish without a task context: runCommand) does the same.
+host.calls = [];
+const bar8 = new prefixMod.default(); bar8.init({}, cx2);
+bar8.finish("rg"); await settle();
+assert.equal(host.calls.at(-1)?.name, "tab.new", "outside RAM: its own tab, not ram.rg");
+host.shared.set("layout", "ram"); host.calls = [];
+const bar7 = new prefixMod.default(); bar7.init({}, cx2);
+bar7.finish("rg", cx2);
+assert.deepEqual(host.calls.at(-1), { name: "ram.rg", args: {} }, "in RAM, RAM opens it");
+barText = textOf(bar.render(cx2));
+assert(barText.includes("search") && barText.includes("/") && barText.includes("rg-fzf"), "search: / rg-fzf");
 host.focused = null;
-console.log("PASS: the ^b bar (every layout) lists g lazygit (it works everywhere) and m, i, r under levels only while RAM shows");
+console.log("PASS: the ^b bar (every layout) lists g lazygit and / rg-fzf (they work everywhere) and m, i, r under levels only while RAM shows");
 // ^b w: navigate mode, as in the Herdr TUI, each move shown at once: j/k through the
 // spaces (the layout's own list marks the one it's on), h/l through that space's
 // tabs, H J K L the panes; Enter stays, Esc goes back. No picker.
