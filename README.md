@@ -17,7 +17,7 @@ the top.
   branch. The `@` stick on the left lists every space with the files changed in
   each. Click a stick to jump to that space.
 - **space** (`^b i`): the space you work in, with its stack of tabs, heap of
-  agents, other machines and git.
+  agents, other machines, git, and its repo's languages (LANG, below).
 
   ![RAM's space level](screenshots/space.png)
 
@@ -35,7 +35,7 @@ in every layout, and an optional Neovim theme follows the layout.
 |---|---|
 | `layouts/ram.json`, `layouts/ram.svg` | the layout, and the picture Settings shows for it |
 | `themes/ram.json` | phosphor green on near-black, amber for the current thing |
-| `mods/ram/` | the layout's one mod: the strip, the side column, the sticks, hunk |
+| `mods/ram/` | the layout's one mod: the strip, the side column, the sticks, hunk, LANG |
 | `mods/ram-prefix/` | the `ctrl-b` key bar, in every layout (with `^b w` navigate mode, `^b g` lazygit and `^b /` rg-fzf) |
 | `mods/ram-text-bigger/`, `mods/ram-text-smaller/` | ⌘+ and ⌘−: the terminals' text a size bigger or smaller |
 | `keys.json` | only the keys RAM needs; they go next to yours |
@@ -154,6 +154,24 @@ space it's on in cyan.
 
 Every key is in `keys.json` (`mod:ram-prefix` holds the keys after `ctrl-b`)
 and shows in Herdr's keybinds screen, where you can change them.
+
+## LANG: the repo's languages
+
+Under GIT in the space level, LANG shows the space's repo by language, the way
+GitHub's Languages section does: a bar of each language's share of the bytes,
+then the three biggest with their share and file count, then `+n more`. It
+counts the files committed at HEAD and finds each one's language by its
+extension (or its name, like `Makefile`). Programming and markup languages
+count, as on GitHub; vendored and generated files (`node_modules/`, `vendor/`,
+lock files, `*.min.js`) never do.
+
+- Click a language for its files, biggest first. Click a file and it opens in
+  `$EDITOR` in a new tab.
+- Click `LANG` or `+n more` for every language.
+- `ext` picks what else counts: data (JSON, YAML...), prose (Markdown, text)
+  and extensions RAM doesn't know. Your picks apply to every repo.
+- In a short column LANG gives way first (its rows, then all of it), so the
+  stack and heap keep room.
 
 ## lazygit, rg-fzf and hunk
 

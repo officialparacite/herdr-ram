@@ -182,6 +182,9 @@ const stub = url(`
     // The main stick's diff and commit box.
     if (command === "git" && args.includes("diff") && args.includes("--")) return { code: 0, stdout: host.diffText ?? "", stderr: "" };
     if (command === "git" && (args[0] === "add" || args[0] === "commit")) return { code: host.commitCode ?? 0, stdout: "", stderr: host.commitErr ?? "" };
+    // LANG's read: a repo's tree from host.lsTree (none: no commit yet).
+    if (command === "git" && args.includes("ls-tree"))
+      return host.lsTree ? { code: 0, stdout: host.lsTree, stderr: "" } : { code: 128, stdout: "", stderr: "fatal: Not a valid object name HEAD" };
     // Folders under /repo/<name> are in that repo, for the key bar's lazygit and rg-fzf outside RAM.
     if (command === "git" && args[0] === "rev-parse" && args[1] === "--show-toplevel" && opts?.cwd?.startsWith("/repo/"))
       return { code: 0, stdout: opts.cwd.split("/").slice(0, 3).join("/") + "\\n", stderr: "" };
@@ -1348,6 +1351,130 @@ assert.equal(keysFile[`mod:${BAR}`]["/"], `${BAR}.rg`, "^b / is bound in every l
     'exec "${SHELL:-/bin/sh}" -il']);
 }
 console.log("PASS: ^b / and the space level's rg-fzf button: rg-fzf in a tab at the repo (else the folder), lit while it runs; Esc closes it and you're back; a pick stays printed in a plain shell tab");
+
+// ---- LANG: the space's repo by language, under GIT (space level) ---------------------------
+{
+  const lg = await import(await load("mods/ram/langs.js"));
+  // A file's language: by extension, by name, or its key when the table doesn't know it.
+  assert.deepEqual(["src/a.rs", "x/Makefile", "app.TSX", ".zshrc", "notes.md", "a.weird", "LICENSE", "a.min.js"].map(p => lg.langOf(p).key),
+    ["Rust", "Makefile", "TSX", "Shell", "Markdown", ".weird", "(no extension)", "JavaScript"]);
+  // git ls-tree -r -l -z: blobs with sizes; symlinks, submodules and vendored files are left out.
+  const tree = ["100644 blob aaa     1200\tsrc/main.rs", "100644 blob bbb      300\tsrc/lib.rs", "100755 blob ccc       90\tbuild.sh",
+    "100644 blob ddd      400\tREADME.md", "100644 blob eee      100\t.github/ci.yml", "100644 blob fff       50\tdata.weird",
+    "120000 blob ggg       11\tlink.rs", "160000 commit hhh       -\tsub", "100644 blob iii     9000\tCargo.lock",
+    "100644 blob jjj     5000\tnode_modules/x/i.js", "100644 blob kkk      700\tweb/app.min.js", "100644 blob lll       60\tweb/app.ts", ""].join("\0");
+  const files = lg.parseTree(tree);
+  assert.deepEqual(files.map(f => [f.path, f.size]), [["src/main.rs", 1200], ["src/lib.rs", 300], ["build.sh", 90], ["README.md", 400],
+    [".github/ci.yml", 100], ["data.weird", 50], ["web/app.ts", 60]], "no symlink, submodule, lock file, node_modules or .min.js");
+  // By default programming and markup count, biggest first, shares of the bytes counted.
+  let list = lg.summarize(files);
+  assert.deepEqual(list.map(l => [l.name, l.bytes, l.count]), [["Rust", 1500, 2], ["Shell", 90, 1], ["TypeScript", 60, 1]]);
+  assert.equal(Math.round(list.reduce((n, l) => n + l.share, 0) * 1e9), 1e9, "the shares add up to all of it");
+  assert.deepEqual(list.map(l => lg.shareText(l.share)), ["90.9%", "5.5%", "3.6%"]);
+  assert.deepEqual(list[0].files.map(f => f.path), ["src/main.rs", "src/lib.rs"], "a language's files, biggest first");
+  // Included: data, prose and unknown types count too.
+  list = lg.summarize(files, ["Markdown", "YAML", ".weird"]);
+  assert.deepEqual(list.map(l => l.name), ["Rust", "Markdown", "YAML", "Shell", "TypeScript", ".weird"]);
+  assert.deepEqual(lg.others(files, ["YAML"]).map(o => [o.key, o.count, o.on, o.exts.join(" ")]),
+    [["Markdown", 1, false, ".md .markdown"], ["YAML", 1, true, ".yml .yaml"], [".weird", 1, false, ""]], "the picker: what doesn't count by default");
+  assert.deepEqual([lg.shareText(0.0001), lg.shareText(1), lg.sizeText(900), lg.sizeText(2048), lg.sizeText(3 * 1048576)],
+    ["<0.1%", "100.0%", "900 B", "2.0 KB", "3.0 MB"]);
+  assert.deepEqual([lg.visible("#292929"), lg.visible("#dea584")], ["#898989", "#dea584"], "the darkest colors are lifted to show on black");
+  // The side column reads the repo on its 250 ms tick: git ls-tree at the repo's top, on its machine.
+  host.shared.set("ram.zoom", "space"); host.shared.delete("ram.lang.include");
+  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");
+  const lside = view({ role: "side" });
+  lside.size = { width: 340, height: 1100 };
+  lside.gitInfo.git[JSON.stringify([null, "/repo/api"])] = side.gitInfo.git[JSON.stringify([null, "/repo/api"])];
+  let lt = R(lside, { role: "side" });
+  assert.deepEqual(textOf(withId(lt, "ram-lang-head")), ["LANG", "counting\u2026", "ext"], "under GIT, before the first read");
+  host.execs = []; host.lsTree = tree;
+  const ticks = host.timers.filter(tm => tm.ms === 250);
+  const apiGit = lside.gitInfo.git[JSON.stringify([null, "/repo/api"])];
+  ticks.at(-1).fn(cx); await settle();
+  // (That tick also asked git again, which this fixture can't answer for /repo/api.)
+  lside.gitInfo.git[JSON.stringify([null, "/repo/api"])] = apiGit;
+  const reads = host.execs.filter(e => e.args.includes("ls-tree"));
+  assert.deepEqual(reads.map(e => [e.args.slice(-6), e.opts]), [[["ls-tree", "-r", "-l", "-z", "--full-tree", "HEAD"], { cwd: "/repo/api", on: null }]]);
+  ticks.at(-1).fn(cx); await settle();
+  assert.equal(host.execs.filter(e => e.args.includes("ls-tree")).length, 1, "not again within the minute");
+  lt = R(lside, { role: "side" });
+  const order = flatten(lt).map(idOf).filter(id => ["ram-git", "ram-lang", "ram-settings"].includes(id));
+  assert.deepEqual(order, ["ram-git", "ram-lang", "ram-settings"], "LANG sits between GIT and the keys");
+  assert.deepEqual(textOf(withId(lt, "ram-lang-head")), ["LANG", "3 languages", "ext"]);
+  assert.equal(withId(lt, "ram-lang-bar").kids.length, 3, "a bar segment per language");
+  assert.deepEqual(textOf(withId(lt, "ram-lang-0")), ["Rust", "90.9%", "2 files"]);
+  assert(withId(lt, "ram-lang-2") && !withId(lt, "ram-lang-more"), "three languages: all three, no +n more");
+  // More than three: the biggest three, then +n more.
+  host.shared.set("ram.lang.include", ["Markdown", "YAML", ".weird"]);
+  lt = R(lside, { role: "side" });
+  assert(withId(lt, "ram-lang-2") && !withId(lt, "ram-lang-3"));
+  assert.deepEqual(textOf(withId(lt, "ram-lang-more")), ["+3 more"]);
+  // Clicks: a language opens its files, the header and +n more all of them, ext the picker.
+  host.overlays = [];
+  const want = (mode, lang = null) => ({ mod: "ram", kind: "dialog", width: 500, height: 420,
+    props: { role: "lang", space: "s0", top: "/repo/api", machine: null, repo: "herdr", mode, lang } });
+  click(lt, "ram-lang-1"); click(lt, "ram-lang-head"); click(lt, "ram-lang-more"); click(lt, "ram-lang-ext");
+  assert.deepEqual(host.overlays, [want("files", "Markdown"), want("list"), want("list"), want("ext")]);
+  // A short column: LANG's rows give way, then LANG, so the stack and heap keep room.
+  const heightWith = h => { lside.size = { width: 340, height: h }; const tr = R(lside, { role: "side" });
+    return { rows: flatten(tr).filter(n => /^ram-lang-\d$/.test(idOf(n) ?? "")).length, lang: Boolean(withId(tr, "ram-lang")), tr }; };
+  const tall = heightWith(1100), mid = heightWith(560), short = heightWith(470);
+  assert.deepEqual([tall.rows, tall.lang], [3, true]);
+  assert(mid.lang && mid.rows < 3, `a shorter column has fewer language rows (${mid.rows})`);
+  assert.deepEqual([short.rows, short.lang], [0, false], "a short one has no LANG");
+  for (const { tr } of [tall, mid, short]) assert(withId(tr, "stack-s0") && withId(tr, "ram-git") && withId(tr, "ram-settings"));
+  lside.size = { width: 340, height: 1100 };
+  // Only the space level, and only with a repo.
+  host.shared.set("ram.zoom", "meta");
+  assert(!withId(R(lside, { role: "side" }), "ram-lang"), "not in meta");
+  host.shared.set("ram.zoom", "space");
+  spaces[0].tabs.push({ id: "tabHK2", name: "hunk diff", named: true, index: 3, active: false, settled: false, status: null });
+  panes.push({ pane: "pHK2", terminal: "tHK2", tab: "tabHK2", title: "hunk", status: null, focused: true, program: { name: "hunk" } });
+  raw.push({ address: "tHK2", state: "live", created_ms: 9800, labels: { "ram.hunk": "diff" } });
+  spaces[0].tabs.forEach(t => t.active = t.id === "tabHK2");
+  assert.equal(level(), "hunk");
+  assert(withId(R(lside, { role: "side" }), "ram-git") && !withId(R(lside, { role: "side" }), "ram-lang"), "not in the hunk level");
+  spaces[0].tabs.pop(); panes.pop(); raw.pop();
+  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");
+  spaces[0].folder = "/home/tester/notes"; lside.gitInfo.git[JSON.stringify([null, "/home/tester/notes"])] = null;
+  const keepGit = lside.gitInfo.git[JSON.stringify([null, "/repo/api"])];
+  delete lside.gitInfo.git[JSON.stringify([null, "/repo/api"])];
+  assert(!withId(R(lside, { role: "side" }), "ram-lang"), "not a repo: no LANG");
+  spaces[0].folder = "/repo/api"; lside.gitInfo.git[JSON.stringify([null, "/repo/api"])] = keepGit;
+  // The dialog (role "lang"): every language, a language's files, the picker. It reads the repo itself.
+  host.shared.delete("ram.lang.include");
+  const dprops = mode => ({ role: "lang", space: "s0", top: "/repo/api", machine: null, repo: "herdr", mode, lang: null, overlay: "oL" });
+  let dv = view(dprops("list")); await settle();
+  let dt = R(dv, dprops("list"));
+  assert.deepEqual(textOf(withId(dt, "lang-row-0")), ["Rust", "90.9%", "2 files"]);
+  assert.equal(withId(dt, "lang-view-bar").kids.length, 3);
+  host.props = dprops("list");
+  click(dt, "lang-row-0");
+  dt = R(dv, dprops("list"));
+  assert.deepEqual(textOf(withId(dt, "lang-file-0")), ["src/main.rs", "1.2 KB"], "Rust's files, biggest first");
+  host.calls = []; host.closed = [];
+  click(dt, "lang-file-1");
+  assert.deepEqual(host.calls, [{ name: "tab.new", args: { space: "s0", folder: "/repo/api", name: "lib.rs",
+    argv: ["exec", "sh", "-c", 'exec "${EDITOR:-vi}" "$1"', "sh", "src/lib.rs"] } }], "a file opens in $EDITOR in a new tab");
+  assert.deepEqual(host.closed, ["oL"], "and the dialog closes");
+  click(dt, "lang-back");
+  assert(withId(R(dv, dprops("list")), "lang-row-0"), "← all: the list again");
+  // The picker: a click includes a type in every repo's LANG; again leaves it out.
+  dv = view(dprops("ext")); await settle();
+  dt = R(dv, dprops("ext"));
+  assert.deepEqual(textOf(withId(dt, "lang-ext-0")).slice(1), ["Markdown", ".md .markdown", "1 file", "400 B"]);
+  click(dt, "lang-ext-1");
+  assert.deepEqual(host.shared.get("ram.lang.include"), ["YAML"]);
+  click(R(dv, dprops("ext")), "lang-ext-0");
+  assert.deepEqual(host.shared.get("ram.lang.include"), ["Markdown", "YAML"]);
+  assert.deepEqual(textOf(withId(R(dv, dprops("ext")), "lang-ext-0"))[0], "\u2713", "ticked");
+  click(R(dv, dprops("ext")), "lang-ext-0");
+  assert.deepEqual(host.shared.get("ram.lang.include"), ["YAML"], "again: left out");
+  assert.deepEqual(textOf(withId(R(lside, { role: "side" }), "ram-lang-head")).slice(0, 2), ["LANG", "4 languages"], "the column counts it");
+  host.shared.delete("ram.lang.include"); host.lsTree = null; host.props = {};
+}
+console.log("PASS: LANG (space level, under GIT): the repo's committed files by language, GitHub's way (bytes, programming and markup; vendored out); a bar, the top three and +n more; a language's files open in $EDITOR; ext picks what else counts");
 // The space's repo: the shown tab's folder (its focused terminal first), else another tab's.
 const { Git } = await import(gitURL);
 const gi = new Git(), K = d => JSON.stringify([null, d]);
@@ -1766,7 +1893,7 @@ assert(motions(RR()).length > 0, "active again: the scan line sweeps the sticks"
 host.shared.set("ram.zoom", "space");
 Object.assign(host, { spaces: [], panes: [], agents: [], raw: [], calls: [] });
 host.storage.clear();  // no exit history: nothing retained from closed spaces
-for (const role of [{}, { role: "side" }, { role: "peek" }, { role: "rams" }]) {
+for (const role of [{}, { role: "side" }, { role: "peek" }, { role: "rams" }, { role: "lang" }]) {
   const v = view(role);
   assert(v.render(cx), JSON.stringify(role));
 }
@@ -1777,7 +1904,7 @@ assert(textOf(view({ role: "rams" }).render(cx)).includes("No regions yet: open 
 assert(textOf(view({ role: "side" }).render(cx)).includes("STACK \u2193  0"), "meta's main stick with nothing open");
 await settle();
 assert(!host.calls.some(c => !c.name.startsWith("layout.")), "an empty window runs nothing but sizes");
-for (const file of ["mods/ram/main.js", "mods/ram/ui.js", "mods/ram/all.js", "mods/ram/hunk.js", "mods/ram/model.js", "mods/ram/git.js", "mods/ram/mod.json", "layouts/ram.json", "layouts/ram.svg", "themes/ram.json", `mods/${BAR}/main.js`]) {
+for (const file of ["mods/ram/main.js", "mods/ram/ui.js", "mods/ram/all.js", "mods/ram/hunk.js", "mods/ram/model.js", "mods/ram/git.js", "mods/ram/langs.js", "mods/ram/mod.json", "layouts/ram.json", "layouts/ram.svg", "themes/ram.json", `mods/${BAR}/main.js`]) {
   const content = await read(file);
   assert(!/\/(?:Users|home)\/[^/\s]+/.test(content), `private home path in ${file}`);
   assert(!/[\u2013\u2014]/u.test(content), `en/em dash in ${file}`);
