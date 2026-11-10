@@ -57,8 +57,20 @@ Neovim theme.
   space from `0x01` down, `◂SP` on the one you're in, `@machine`, FAULT,
   `◆n`, and on its label row a `/ rg-fzf` button, drawn as meta's `d diff`, then
   `+` for a new space), HEAP (this space's agents, the oldest at the
-  bottom), `.rodata`, GIT (`repo · branch`, marks, changed files) and the keys
-  row, which never gets cut off; lists that don't fit end in `+n more`.
+  bottom), `.rodata`, GIT (`repo · branch`, marks, changed files), LANG and
+  the keys row, which never gets cut off; lists that don't fit end in `+n
+  more`.
+- **LANG** (space level, with a repo): a line `LANG`, `n languages` and an
+  `ext` box; a 6x1.25 bar of segments as wide as each language's share of the
+  bytes (at least 2 px, 1 px apart, GitHub's colors, the darkest lifted 45%
+  toward white so they show on black); then the three biggest (a dot, the
+  name, `90.9%`, `2 files`) and `+n more`. In a short column its rows give way
+  first, then the whole section, while the stack and heap have room for three
+  and two rows. A language opens a 500x420 dialog of its files (biggest first,
+  their sizes; a click runs `tab.new` with `exec sh -c 'exec "${EDITOR:-vi}"
+  "$1"' sh <path>` at the repo's top); `LANG` and `+n more` open the list of
+  every language; `ext` the picker of the repo's data, prose and unknown
+  types (a tick each, its extensions, files and size).
 - **hunk:** the review fills the terminal block, the side column lists the
   open reviews (the current space's first, `✎n` notes, the id `/hunk` takes,
   a hover `✕`), and a 180px strip under the review shows the last lines of the
@@ -139,9 +151,14 @@ Neovim theme.
   open); `git.js` branch and counts per space (`git status`, `git rev-parse`,
   `git diff --numstat`, again on `watchFolder` changes and every minute);
   `model.js` the agents and exit history; `ui.js` the colors and small parts;
+  `langs.js` LANG: the language table (name, GitHub's color, kind, extensions,
+  file names), `git ls-tree -r -l -z --full-tree HEAD` at the repo's top on its
+  machine (again when the branch changes and every minute), the summary and
+  the dialog (role `lang`, modes `list`, `files`, `ext`);
   `arrow.svg` the frames' arrow head.
 - Shared state: `ram.zoom` (meta or not), `ram.side` (dragged widths),
-  `ram.all.mode`, `ram.all.wrap`, `ram.follow`, `ram.from`, `ram.hunk.*`, and
+  `ram.all.mode`, `ram.all.wrap`, `ram.follow`, `ram.from`, `ram.hunk.*`,
+  `ram.lang.include` (what else LANG counts: language names and `.ext`s), and
   `navigate.space` (`{id, at}`, set by the key bar).
 - Commands: `tab.select`, `space.select`, `tab.move`, `space.move`,
   `tab.close`, `tab.rename`, `space.rename`, `space.new`, `agent.focus`,
@@ -234,6 +251,9 @@ renamed. `install.sh` does all of it and backs up what it replaces.
   and GIT beside it; `^b r` in a repo opens the review menu and a review in a
   tab of its own, and `^b r` again goes back.
 - `^b g` opens lazygit at the space's repo and quitting it closes its tab.
+- In the space level, LANG under GIT shows the repo's languages with the
+  same shares GitHub would give its committed code; `ext` and a tick on YAML
+  makes YAML count; a language's file opens in `$EDITOR`.
 - `^b /` opens rg-fzf at the space's repo; Enter leaves the picked files
   printed in a shell tab, and Esc closes the tab.
 - `^b w`, `j` shows the next space at once, with a cyan outline on it while

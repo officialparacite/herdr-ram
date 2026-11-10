@@ -27,6 +27,7 @@ import { agents, spaces, panes, terminals, props, run, theme, setAgentOrder, win
 import { scene, remember, confirm, towers } from "./model.js";
 import { Git } from "./git.js";
 import { AllStick } from "./all.js";
+import { LangData, LangView, INCLUDE, summarize, langBar, shareText, filesText, visible } from "./langs.js";
 import { HUNK_LABEL, COMMANDS, labelOf, Sessions, entries, nameOf, HunkMenu, HUNK_ROW, HUNK_HEAD, ordered, hunkRow, marker } from "./hunk.js";
 import { AMBER, CYAN, GOLD, GREEN, RED, ROM, ROM_LINE, ROM_BG, ROM_HOVER, U, CELL, LED, STATUS, RANK, ADDR, REF,
   stop, textW, terse, identity, shortcut, led, fault, marks, headGroup, navigating } from "./ui.js";
@@ -96,6 +97,11 @@ function gitHeight(g, max) {
 const machinesHeight = n => 1 + (12 + 18 + 33 * n) * U;
 // A "+n more" row.
 const MORE_H = 18 * U;
+// LANG (the space level, under GIT): its header line, the bar, then up to
+// LANG_ROWS languages and a "+n more" line, LANG_GAP apart. Each has a 1 px top border.
+const LANG_PAD = 6 * U, LANG_TOP = 17 * U, LANG_BAR = 6 * U, LANG_GAP = 4 * U, LANG_LINE = 16 * U, LANG_ROWS = 3;
+const langHeight = (rows, more, bar) =>
+  1 + 2 * LANG_PAD + LANG_TOP + (bar ? LANG_GAP + LANG_BAR : 0) + (rows + (more ? 1 : 0)) * (LANG_GAP + LANG_LINE);
 // How many of COUNT rows ROW_H px tall fit in BUDGET px (at least MIN): all,
 // or some and, when it fits, a "+n more" row. A compact column keeps a row
 // over the "+n more" row (its label counts them all anyway).
@@ -224,6 +230,7 @@ export default class Ram extends View {
     this.peekLines = [];
     const role = props()?.role;
     if (role === "hunk-menu") { this.menuView = new HunkMenu(cx); return; }
+    if (role === "lang") { this.langView = new LangView(cx); return; }
     if (role === "peek") {
       cx.timer.every(1500, cx => this.readPeek(cx));
       return;
@@ -236,6 +243,11 @@ export default class Ram extends View {
     cx.timer.every(250, cx => {
       if (role === "rams" && level() !== "meta") return;
       this.gitInfo.tick(role ? spaces() : spaces().filter(s => s.active), panes(), cx);
+      // LANG reads the shown space's repo (langs.js reads only when it must).
+      if (role === "side" && level() === "space" && this.langs) {
+        const s = activeSpace(), g = s ? this.gitInfo.info(s, panes()) : null;
+        if (g?.top) this.langs.tick(s.machine, g.top, g.branch, cx);
+      }
     });
     if (role === "side") {
       // Other machines, as Traveler lists them: `hc machine ls`, every 15 s.
@@ -244,6 +256,7 @@ export default class Ram extends View {
       cx.timer.every(15000, cx => { if (window()?.active) this.refreshMachines(cx); });
       // In meta this column is the main stick (all.js).
       this.all = new AllStick(this);
+      this.langs = new LangData();
       return;
     }
     if (role === "rams") {
@@ -1241,8 +1254,18 @@ export default class Ram extends View {
         .when(list.length > rows.length, el => el.child(more("ram-hunk-more", list.length - rows.length, "reviews")));
       hunkH = 1 + HUNK_HEAD + rows.length * HUNK_ROW + (list.length > rows.length ? MORE_H : 0);
     }
-    const fixed = files => 2 + (20 + 20 + 6) * U + machinesHeight((this.machines ?? []).length) + gitHeight(g, files) + KEYS_H + hunkH;
+    // LANG (the space level, with a repo): the bar and up to LANG_ROWS
+    // languages. Its rows give way first, then LANG itself, so the stack and
+    // heap keep room for a few rows; then GIT's file names.
+    const langFiles = lvl === "space" && g ? this.langs?.files(s.machine, g.top) : undefined;
+    const langList = langFiles ? summarize(langFiles, shared(INCLUDE) ?? []) : [];
+    let langOn = lvl === "space" && Boolean(g), langRows = Math.min(LANG_ROWS, langList.length);
+    const langH = () => langOn ? langHeight(langRows, langRows > 0 && langRows < langList.length, langList.length > 0) : 0;
+    const fixed = files => 2 + (20 + 20 + 6) * U + machinesHeight((this.machines ?? []).length) + gitHeight(g, files) + langH() + KEYS_H + hunkH;
     let gitFiles = compact ? 2 : 4;
+    const enough = 3 * stackRow + 2 * heapRow;
+    while (langOn && langRows > 0 && this.size.height - fixed(gitFiles) < enough) langRows--;
+    if (langOn && this.size.height - fixed(gitFiles) < enough) langOn = false;
     if (this.size.height - fixed(gitFiles) < stackRow) gitFiles = 0;
     const room = Math.max(0, this.size.height - fixed(gitFiles));
     const st = fit(data.spaces.length, stackRow, Math.max(stackRow, room * 0.55), compact, 1);
@@ -1314,12 +1337,13 @@ export default class Ram extends View {
       .child(free)
       .child(heapList)
       .child(label(`HEAP \u2191${count(heap.length)}`));
-    const detailsH = machinesHeight((this.machines ?? []).length) + gitHeight(g, gitFiles);
+    const detailsH = machinesHeight((this.machines ?? []).length) + gitHeight(g, gitFiles) + langH();
     const detailsRoom = Math.max(0, this.size.height - 2 - memoryMin - KEYS_H - hunkH);
     const details = v_flex().id("ram-side-details").flex_none()
       .when(detailsH > detailsRoom, el => el.h(detailsRoom).overflow_y_scrollbar())
       .child(this.machinesRegion(compact))
-      .child(this.gitRegion(s, gitFiles));
+      .child(this.gitRegion(s, gitFiles))
+      .when(langOn, el => el.child(this.langRegion(s, g, langList, langRows)));
     return this.sized(shell)
       .children(hunkSection ? [hunkSection] : [])
       .child(memory)
@@ -1421,6 +1445,49 @@ export default class Ram extends View {
     return box;
   }
 
+  // LANG: the space's repo by language (langs.js), as GitHub shows it: a bar of
+  // each language's share of the bytes, then the biggest ROWS (share, files),
+  // then "+n more". A language opens its files in a dialog (a click there opens
+  // one in $EDITOR); the header and "+n more" open them all; ext picks what else
+  // counts (YAML, Markdown...). Its lines have the heights langHeight() counts.
+  langRegion(s, g, list, rows) {
+    const t = theme(), files = this.langs?.files(s.machine, g.top);
+    const open = (mode, lang = null) => openOverlay({ mod: "ram", kind: "dialog", width: 500, height: 420,
+      props: { role: "lang", space: s.id, top: g.top, machine: s.machine ?? null, repo: g.name, mode, lang } });
+    const said = files === undefined ? "counting\u2026"
+      : list.length ? `${list.length} ${list.length === 1 ? "language" : "languages"}` : "no code counted";
+    const ext = h_flex().id("ram-lang-ext").h(15 * U).px(4 * U).flex_none().items_center().rounded(2).border(1).border_color(t.input)
+      .text_size(10 * U).text_color(t.muted).cursor_pointer().hover(st => st.bg(t.hover).text_color(AMBER))
+      .tooltip("Count more file types: YAML, Markdown and others")
+      .on_mouse_down("left", stop)
+      .on_click((_e, cx) => { cx.stop_propagation(); open("ext"); })
+      .child("ext");
+    const box = v_flex().id("ram-lang").flex_none().px(10 * U).py(LANG_PAD).gap(LANG_GAP).border_t(1).border_color(t.border)
+      .child(h_flex().id("ram-lang-head").h(LANG_TOP).flex_none().gap(6 * U).items_center().rounded(2).cursor_pointer()
+        .hover(st => st.bg(t.hover)).tooltip(`${g.name}: every language, by size`)
+        .on_mouse_down("left", stop)
+        .on_click((_e, cx) => { cx.stop_propagation(); open("list"); })
+        .child(div().flex_none().text_size(10.5 * U).text_color(CYAN).child("LANG"))
+        .child(div().flex_1().min_w(0).truncate().text_size(11 * U).text_color(t.dim).child(said))
+        .child(ext));
+    if (!list.length) return box;
+    box.child(langBar("ram-lang-bar", list, Math.max(20, this.size.width - 2 - 20 * U), LANG_BAR));
+    list.slice(0, rows).forEach((l, k) => box.child(h_flex().id(`ram-lang-${k}`).h(LANG_LINE).flex_none().gap(6 * U).items_center()
+      .rounded(2).cursor_pointer().hover(st => st.bg(t.hover)).tooltip(`${l.name}: ${filesText(l.count)} (click: the files)`)
+      .on_mouse_down("left", stop)
+      .on_click((_e, cx) => { cx.stop_propagation(); open("files", l.name); })
+      .child(div().size(7 * U).flex_none().rounded_full().bg(visible(l.color)))
+      .child(div().flex_1().min_w(0).truncate().text_size(11 * U).text_color(t.foreground).child(l.name))
+      .child(div().flex_none().text_size(10.5 * U).text_color(t.muted).child(shareText(l.share)))
+      .child(div().w(52 * U).flex_none().text_size(10.5 * U).text_color(t.dim).child(filesText(l.count)))));
+    if (rows > 0 && rows < list.length) box.child(h_flex().id("ram-lang-more").h(LANG_LINE).flex_none().items_center().rounded(2)
+      .cursor_pointer().hover(st => st.bg(t.hover)).text_size(10.5 * U).text_color(t.dim).tooltip("Every language")
+      .on_mouse_down("left", stop)
+      .on_click((_e, cx) => { cx.stop_propagation(); open("list"); })
+      .child(`+${list.length - rows} more`));
+    return box;
+  }
+
   keysRow(compact) {
     const t = theme();
     const item = (id, icon, label, command) => h_flex().id(`ram-${id}`).flex_1().h(KEY_H).gap(5 * U).items_center().justify_center().rounded(2)
@@ -1482,6 +1549,7 @@ export default class Ram extends View {
   render(cx) {
     const role = props()?.role;
     if (role === "hunk-menu") return this.menuView.render();
+    if (role === "lang") return this.langView.render();
     this.countReviews();
     if (role === "side") return this.side(cx);
     if (role === "peek") return this.peek();
