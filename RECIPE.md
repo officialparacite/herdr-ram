@@ -83,8 +83,9 @@ to review its diff. Comes with lazygit, a ctrl-b key bar and a Neovim theme.
   review stays open), `^b f` or the `f` square follow in meta (when an agent
   newly needs you, show the one waiting longest; wait while the shown tab's
   agent needs you; move on once it's answered; never undo a tab you picked;
-  once nothing has needed you for a second, go back to the tab you were on
-  before its first move, unless that tab closed or you picked another), `^b d` the main
+  once you answer the last one, go straight back to the tab you were on
+  before its first move, unless that tab closed or you picked another; an
+  agent that asks again is shown again at once), `^b d` the main
   stick's diff view (from another level: meta with diff), `^b g` lazygit.
 - `^b w` navigate mode: the bar shows one row (`navigate`, the space's name,
   `@machine`, `i of n`); `j`/down and `k`/up move round the ends, Enter goes
