@@ -29,6 +29,7 @@
     "i": "ram-prefix.ram.space",
     "r": "ram-prefix.ram.hunk",
     "g": "ram-prefix.lazygit",
+    "/": "ram-prefix.rg",
     "f": "ram-prefix.ram.follow",
     "d": "ram-prefix.ram.changes",
     "h": "ram-prefix.pane.go:left",
