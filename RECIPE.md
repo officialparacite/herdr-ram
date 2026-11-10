@@ -85,10 +85,14 @@ to review its diff. Comes with lazygit, a ctrl-b key bar and a Neovim theme.
   before its first move, unless that tab closed or you picked another; an
   agent that asks again is shown again at once), `^b d` the main
   stick's diff view (from another level: meta with diff), `^b g` lazygit.
-- `^b w` navigate mode: the bar shows one row (`navigate`, the space's name,
-  `@machine`, `i of n`); `j`/down and `k`/up move round the ends, Enter goes
-  there, Esc or any other key leaves things as they were. RAM outlines that
-  space in cyan in every list of spaces.
+- `^b w` navigate mode, each move shown at once: the bar shows one row
+  (`navigate`, the space's name, `@machine`, `i of n`, `tab n` and its name,
+  `i of n`); `j`/down and `k`/up the next and previous space, `h`/left and
+  `l`/right that space's tabs (round the ends, settled tabs skipped), `H` `J`
+  `K` `L` the pane that way (`pane.go`). Enter, any other key or a click
+  outside the bar stays; Esc goes back to the space, tab and pane it started
+  on (those still there). RAM outlines that space in cyan in every list of
+  spaces.
 - lazygit: a GIT line, a stick's git line or `^b g` opens it in a tab at the
   space's repo (the shown tab's folder, else another tab's); quitting it
   closes the tab and RAM shows the tab you came from. No repo: GIT says "not a
@@ -216,8 +220,9 @@ to review its diff. Comes with lazygit, a ctrl-b key bar and a Neovim theme.
   and GIT beside it; `^b r` in a repo opens the review menu and a review in a
   tab of its own, and `^b r` again goes back.
 - `^b g` opens lazygit at the space's repo and quitting it closes its tab.
-- `^b w`, `j`, Enter shows the next space, with a cyan outline on it while
-  navigating.
+- `^b w`, `j` shows the next space at once, with a cyan outline on it while
+  navigating; `l` shows its next tab, `L` the pane to the right, and Esc goes
+  back to where you started.
 - ⌘+ makes the terminals' text bigger and leaves RAM's panels as they were.
 - With the nvim files installed, nvim in a RAM pane loads `herdr-ram` with no
   `Normal` background, and the usual colorscheme in any other layout.

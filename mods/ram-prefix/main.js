@@ -14,11 +14,13 @@
 // navigate mode (below).
 // Esc, any other key, or a click outside the bar closes it at once; a key runs once.
 //
-// Navigate mode (^b w): pick a space in the layout's own list instead of a picker.
-// j or down moves to the next space, k or up to the one before (round the ends),
-// Enter goes there, Esc or any other key leaves things as they were. The space it's
-// on is shared as "navigate.space" ({ id, at }), so each layout's list (RAM,
-// Traveler, Night City) marks it, and the bar says which it is.
+// Navigate mode (^b w): move round the window with single keys, each move shown at
+// once. j or down the next space, k or up the one before, h or left the tab before,
+// l or right the tab after (round the ends), and H J K L the pane that way (outside
+// navigate mode ^b H J K L swap panes). Enter, or any other key, stays where you
+// are; Esc goes back to the space, tab and pane it started on. The space it's on is
+// shared as "navigate.space" ({ id, at }), so each layout's list (RAM, Traveler,
+// Night City) marks it, and the bar says which space and tab it is.
 //
 // How keys arrive: a key keys.json binds here (w, j, k, x...) runs as that binding,
 // so it reaches nextCommand() as its action and never reaches on_key_down (GPUI
@@ -222,12 +224,17 @@ export default class Prefix extends View {
 
   // ---------------------------------------------------------------- navigate mode
 
-  // It starts on the space you're in.
+  // It starts on the space, tab and pane you're in: where Esc goes back to.
   startNav() {
     if (this.done || this.nav) return;
     const list = spaces();
     if (!list.length) { this.cancel(); return; }
-    const here = list.find((s) => s.id === focused()?.space) ?? list.find((s) => s.active) ?? list[0];
+    const f = focused();
+    const here = list.find((s) => s.id === f?.space) ?? list.find((s) => s.active) ?? list[0];
+    const tab = here.tabs.find((t) => t.id === f?.tab) ?? here.tabs.find((t) => t.active) ?? null;
+    this.origin = { space: here.id, tab: tab?.id ?? null, pane: f?.pane ?? null };
+    this.moved = false;
+    this.navTab = tab?.id ?? null;
     this.pointAt(here.id);
   }
 
@@ -236,32 +243,71 @@ export default class Prefix extends View {
     setShared(NAV, { id, at: Date.now() });
   }
 
-  // One key in navigate mode, by its spellings: j or down the next space, k or
-  // up the one before, Enter goes there, any other key cancels.
+  // One key in navigate mode, by its spellings (see the top of this file). The
+  // pane keys are H J K L as keys.json spells them (shift-h) or as typed (H).
   navKey(spellings) {
-    if (spellings.some((k) => k === "j" || k === "down")) this.moveNav(1);
-    else if (spellings.some((k) => k === "k" || k === "up")) this.moveNav(-1);
-    else if (spellings.includes("enter")) this.goNav();
-    else this.cancel();
+    const is = (...ks) => spellings.some((k) => ks.includes(k));
+    const pane = [["shift-h", "H", "left"], ["shift-j", "J", "down"], ["shift-k", "K", "up"], ["shift-l", "L", "right"]]
+      .find(([a, b]) => is(a, b));
+    if (is("j", "down")) this.moveNav(1);
+    else if (is("k", "up")) this.moveNav(-1);
+    else if (is("h", "left")) this.moveTab(-1);
+    else if (is("l", "right")) this.moveTab(1);
+    else if (pane) { this.moved = true; run("pane.go", { direction: pane[2] }); }
+    else if (is("escape")) this.back();
+    else this.stay();
   }
 
-  // BY spaces on, round the ends (from the shown one if its space has gone).
+  // BY spaces on, round the ends (from the shown one if its space has gone), and
+  // show it. Its tabs start from the one it shows (moveTab: the last tab moved to
+  // isn't one of them).
   moveNav(by) {
     const list = spaces();
     if (!list.length) return;
     let i = list.findIndex((s) => s.id === this.nav);
     if (i < 0) i = Math.max(0, list.findIndex((s) => s.active));
-    this.pointAt(list[(((i + by) % list.length) + list.length) % list.length].id);
+    const next = list[(((i + by) % list.length) + list.length) % list.length];
+    this.pointAt(next.id);
+    this.moved = true;
+    run("space.select", { id: next.id });
   }
 
-  // Enter: show that space (already shown: nothing more to do).
-  goNav() {
-    const id = this.nav;
+  // BY tabs on in the space it's on, round the ends, skipping settled tabs (as
+  // tab.next does), and show it.
+  moveTab(by) {
+    const s = spaces().find((x) => x.id === this.nav);
+    const tabs = (s?.tabs ?? []).filter((t) => !t.settled);
+    if (!tabs.length) return;
+    let i = tabs.findIndex((t) => t.id === this.navTab);
+    if (i < 0) i = Math.max(0, tabs.findIndex((t) => t.active));
+    const next = tabs[(((i + by) % tabs.length) + tabs.length) % tabs.length];
+    this.navTab = next.id;
+    this.moved = true;
+    run("tab.select", { id: next.id });
+  }
+
+  // Enter (or any other key, or a click outside the bar): stay where you are.
+  stay() {
     this.endNav();
     if (this.done) return;
     this.done = true;
     this.hide();
-    if (spaces().some((s) => s.id === id && !s.active)) run("space.select", { id });
+  }
+
+  // Esc: back to the space, tab and pane it started on (those still there),
+  // when it moved at all.
+  back() {
+    const o = this.origin, moved = this.moved;
+    this.endNav();
+    if (o && moved) {
+      const s = spaces().find((x) => x.id === o.space);
+      if (s) run("space.select", { id: s.id });
+      if (s?.tabs.some((t) => t.id === o.tab)) run("tab.select", { id: o.tab });
+      if (o.pane && panes().some((p) => p.pane === o.pane)) run("pane.focus", { pane: o.pane });
+    }
+    if (this.done) return;
+    this.done = true;
+    this.hide();
   }
 
   endNav() {
@@ -276,9 +322,11 @@ export default class Prefix extends View {
   }
 
   // When the bar goes (a key ran, Esc, a click outside), it must never act again,
-  // and the layouts stop marking a space.
+  // and the layouts stop marking a space. Still navigating means Herdr closed it
+  // for Esc (a popup's Esc never reaches on_key_down): back to where it started.
   async close() {
     this.done = true;
+    if (this.nav) this.back();
     this.endNav();
   }
 
@@ -301,15 +349,20 @@ export default class Prefix extends View {
         .child(div().text_color(t.dim).text_size(12).child(name))
         .children(rows.map(hint));
     const badge = (text) => div().px(6).bg(t.accent).text_color(t.accent_foreground).font_semibold().child(text);
-    // Navigate mode: which space it's on, then its keys.
+    // Navigate mode: which space and tab it's on, then its keys.
     const list = spaces(), at = list.findIndex((s) => s.id === this.nav), on = list[at];
+    const tabs = (on?.tabs ?? []).filter((x) => !x.settled);
+    const tab = tabs.find((x) => x.id === this.navTab) ?? tabs.find((x) => x.active);
     const navRow = () => h_flex().id("prefix-nav").gap(10).items_center()
       .child(badge("navigate"))
       .child(div().text_color(t.foreground).font_semibold().child(on ? on.name : "no space"))
       .when(Boolean(on?.machine), (el) => el.child(div().text_color(t.dim).child(`@${on.machine}`)))
       .when(Boolean(on), (el) => el.child(div().text_color(t.dim).child(`${at + 1} of ${list.length}`)))
+      .when(Boolean(tab), (el) => el.child(div().text_color(t.foreground).child(`tab ${tab.index}${tab.named ? " " + tab.name : ""}`))
+        .child(div().text_color(t.dim).child(`${tabs.indexOf(tab) + 1} of ${tabs.length}`)))
       .child(div().w(18))
-      .children([{ keys: ["j k"], label: "move" }, { keys: ["Enter"], label: "go" }, { keys: ["Esc"], label: "cancel" }].map(hint));
+      .children([{ keys: ["j k"], label: "space" }, { keys: ["h l"], label: "tab" }, { keys: ["H J K L"], label: "pane" },
+        { keys: ["Enter"], label: "stay" }, { keys: ["Esc"], label: "back" }].map(hint));
     return v_flex()
       .id("prefix-layer")
       .track_focus(this.handle)
@@ -330,7 +383,7 @@ export default class Prefix extends View {
         // it here, unless it started navigate mode meanwhile (^b w).
         cx.timer.after(150, (tcx) => { if (!this.nav) this.dispatch(action, tcx); });
       })
-      .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); this.cancel(); })
+      .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); if (this.nav) this.stay(); else this.cancel(); })
       // Popups size to their content, so the layer asks for more height than any
       // window has: Herdr clips it to the window, and justify_end puts the bar on
       // the bottom edge.
