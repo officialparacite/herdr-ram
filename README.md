@@ -104,21 +104,23 @@ them; Esc, any other key or a click closes it.
 | Area | Keys after `ctrl-b` |
 |---|---|
 | Tabs | `c` new · `n` / `p` next / previous · `1`…`9` go to · `T` rename · `X` close |
-| Spaces | `w` navigate (`j` / `k` or the arrows, Enter goes) · `N` new · `(` / `)` previous / next · `W` rename · `D` close (asks first) · `G` new worktree |
+| Spaces | `w` navigate (`j` / `k` spaces, `h` / `l` tabs, `H` `J` `K` `L` panes; Enter stays, Esc goes back) · `N` new · `(` / `)` previous / next · `W` rename · `D` close (asks first) · `G` new worktree |
 | Panes | `h` `j` `k` `l` focus · `H` `J` `K` `L` swap · `v` split right · `-` split down · `x` close · `z` zoom |
 | Agents | `a` / `A` next / previous |
 | Git | `g` lazygit at the repo you're in |
 | Levels (RAM) | `m` meta · `i` space · `r` hunk · `f` follow (meta) · `d` diff (meta's main stick) |
 | App | `:` palette · `?` all keys · `s` settings · `b` sidebar · `space` next layout · `+` / `_` / `0` zoom in / out / reset · `ctrl-b` sends `ctrl-b` to the program |
 
-`^b w` marks the space you're in; `j` and `k` move the mark (round the ends),
-Enter goes there, Esc leaves things as they were. RAM outlines the marked space
-in cyan.
+`^b w` is navigate mode, and each move shows at once: `j` and `k` (or up and
+down) the next and previous space, `h` and `l` (or left and right) that space's
+tabs, round the ends, and `H` `J` `K` `L` the pane that way. Enter, or any other
+key, stays where you are; Esc goes back to where you started. RAM outlines the
+space it's on in cyan.
 
 Direct keys: ⌘+ / ⌘− make the terminals' text a size bigger or smaller
 (Settings' font size, 8 to 32; RAM's own panels keep their size). In terminals:
-`ctrl-shift-c` / `ctrl-shift-v` copy / paste (`ctrl-insert` / `shift-insert`
-too), `ctrl-v` paste image, `ctrl-shift-f` search, `ctrl-left` / `ctrl-right`
+⌘C / ⌘V or `ctrl-shift-c` / `ctrl-shift-v` copy / paste (`ctrl-insert` /
+`shift-insert` too), `ctrl-v` paste image, `ctrl-shift-f` search, `ctrl-left` / `ctrl-right`
 jump a word, `ctrl-backspace` delete a word, `ctrl-[` Escape (for zsh/bash vi
 mode on macOS).
 

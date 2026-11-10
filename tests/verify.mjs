@@ -1821,8 +1821,9 @@ bar3.finish("lazygit", cx2);
 assert.deepEqual(host.calls.at(-1), { name: "ram.git", args: {} }, "in RAM, RAM opens it (its own repo choice)");
 host.focused = null;
 console.log("PASS: the ^b bar (every layout) lists g lazygit (it works everywhere) and m, i, r under levels only while RAM shows");
-// ^b w: navigate mode, as in the Herdr TUI. j/k through the spaces in the layout's own
-// list (it marks the one you're on), Enter goes there; no picker.
+// ^b w: navigate mode, as in the Herdr TUI, each move shown at once: j/k through the
+// spaces (the layout's own list marks the one it's on), h/l through that space's
+// tabs, H J K L the panes; Enter stays, Esc goes back. No picker.
 {
   const lastOp = (n, key) => [...(n?.ops ?? [])].reverse().find(([k]) => k === key)?.slice(1);
   // Each check finds its row first, so a "not marked" can't pass on a row that isn't there.
@@ -1858,17 +1859,44 @@ console.log("PASS: the ^b bar (every layout) lists g lazygit (it works everywher
   assert.equal(on(), "s0", "it starts on the space you're in");
   let nt = nb.render(cx2);
   assert.deepEqual(textOf(withId(nt, "prefix-nav")).slice(0, 3), ["navigate", "api", "1 of 4"], "the bar says which space it's on");
-  assert(textOf(withId(nt, "prefix-nav")).includes("move") && textOf(withId(nt, "prefix-nav")).includes("go"));
+  for (const label of ["space", "tab", "pane", "stay", "back"]) assert(textOf(withId(nt, "prefix-nav")).includes(label), `the bar's keys: ${label}`);
+  assert.deepEqual(textOf(withId(nt, "prefix-nav")).slice(3, 5), ["tab 1", "1 of 2"], "and which tab");
   assert(!textOf(nt).includes("then a key \u00b7 Esc cancels"), "one row: no hints");
   const path = [];
   for (const k of ["j", "down", "k", "up", "k", "j"]) { await press(nb, k); path.push(on()); }
   assert.deepEqual(path, ["s1", "s2", "s1", "s0", "s3", "s0"], "j/down next, k/up back, round the ends");
-  assert.deepEqual([host.calls, host.closed], [[], []], "j and k only move the mark (no pane.go), and the bar stays");
+  assert.deepEqual(host.calls, path.map(id => ({ name: "space.select", args: { id } })), "each one shows at once (no pane.go)");
+  assert.deepEqual(host.closed, [], "and the bar stays");
   // Should a Herdr hand a bound key to on_key_down as well, it still moves once.
   keyDown(nb, "j"); await deliver(nb, "pane.go:down");
   assert.equal(on(), "s1", "one move, not two");
   await press(nb, "j");
   assert.deepEqual(textOf(withId(nb.render(cx2), "prefix-nav")).slice(0, 4), ["navigate", "ops", "@remote", "3 of 4"], "ops is on another machine: it says so");
+  // h/left and l/right: the tabs of the space it's on, round the ends, each shown at once.
+  host.calls = [];
+  for (const k of ["l", "l", "h", "right", "left"]) await press(nb, k);
+  assert.deepEqual(host.calls.map(c => [c.name, c.args.id]), ["tab2-1", "tab2-0", "tab2-1", "tab2-0", "tab2-1"].map(id => ["tab.select", id]),
+    "l/right the next tab, h/left the one before (h and l are pane keys after ^b: navigate takes them over)");
+  assert.deepEqual(textOf(withId(nb.render(cx2), "prefix-nav")).slice(4, 6), ["tab 2", "2 of 2"], "the bar follows");
+  // A settled tab is skipped, as tab.next does.
+  await press(nb, "l");
+  spaces[2].tabs[1].settled = true; host.calls = [];
+  await press(nb, "l");
+  assert.deepEqual(host.calls, [{ name: "tab.select", args: { id: "tab2-0" } }], "&2 is settled: l stays on &1");
+  spaces[2].tabs[1].settled = false;
+  // H J K L: the pane that way (outside navigate mode ^b H J K L swap panes).
+  host.calls = [];
+  for (const k of ["shift-h", "shift-j", "shift-k", "shift-l"]) await press(nb, k);
+  keyDown(nb, "H");
+  assert.deepEqual(host.calls, ["left", "down", "up", "right", "left"].map(direction => ({ name: "pane.go", args: { direction } })),
+    "H J K L focus that way, as keys.json spells them or as typed");
+  // Another space: its tabs start from the one it shows.
+  host.calls = [];
+  const docsTabs = spaces[3].tabs, after = docsTabs[(docsTabs.findIndex(x => x.active) + 1) % docsTabs.length].id;
+  await press(nb, "j"); await press(nb, "l");
+  assert.deepEqual(host.calls, [{ name: "space.select", args: { id: "s3" } }, { name: "tab.select", args: { id: after } }]);
+  await press(nb, "k");
+  assert.equal(on(), "s2");
   // The lists mark it: RAM's stack (space level), its main stick and sticks (meta), Traveler, Night City.
   host.shared.set("ram.zoom", "space");
   assert.deepEqual(lastOp(must(R(side, { role: "side" }), "stack-s2"), "border_color"), ["#6fe3d3"], "RAM's stack: cyan");
@@ -1913,29 +1941,50 @@ console.log("PASS: the ^b bar (every layout) lists g lazygit (it works everywher
   const shownIds = flatten(R(shortSide, { role: "side" })).map(idOf).filter(id => /^stack-/.test(id ?? ""));
   assert.deepEqual(shownIds, ["stack-s0", "stack-s3"], "two rows fit: the space you're in and the one it's on");
   host.shared.set("navigate.space", { id: "s2", at: Date.now() });
-  // Enter: that space.
+  // Enter: you're already there, so it only closes the bar.
   host.props = { overlay: "oN" }; host.calls = [];
   await press(nb, "enter");
-  assert.deepEqual(host.calls, [{ name: "space.select", args: { id: "s2" } }]);
+  assert.deepEqual(host.calls, [], "nothing more to show");
   assert.deepEqual(host.closed, ["oN"]);
   assert.equal(on(), null, "and nothing is marked any more");
   assert(!lastOp(must(R(side, { role: "side" }), "stack-s2"), "border_color"));
-  // Esc (Herdr closes the popup; or on_key_down, should one get it) and any other key,
-  // bound (x is pane.close, J pane.swap, w again) or not (q), leave things as they were.
-  for (const k of ["escape", "escape-key", "x", "shift-j", "w", "q"]) {
-    nb = bar(); await press(nb, "w"); await press(nb, "j");
-    assert.equal(on(), "s1");
+  // Esc (Herdr closes the popup; or on_key_down, should one get it): back to the space,
+  // tab and pane it started on.
+  const home = [{ name: "space.select", args: { id: "s0" } }, { name: "tab.select", args: { id: "tab0-0" } },
+    { name: "pane.focus", args: { pane: "p0" } }];
+  for (const k of ["escape", "escape-key"]) {
+    nb = bar(); await press(nb, "w"); await press(nb, "j"); await press(nb, "l"); await press(nb, "shift-l");
+    host.calls = [];
     if (k === "escape-key") keyDown(nb, "escape"); else await press(nb, k);
-    assert.deepEqual([host.calls, on()], [[], null], `${k}: cancelled`);
+    assert.deepEqual([host.calls, on()], [home, null], `${k}: back where it started`);
     assert.deepEqual(host.closed, k === "escape" ? [] : ["oN"], `${k}: the bar goes`);
   }
-  // Enter on the space you're in: nothing to do.
-  nb = bar(); await press(nb, "w"); await press(nb, "enter");
-  assert.deepEqual([host.calls, host.closed, on()], [[], ["oN"], null]);
-  // A click outside the bar, or the bar going any other way, clears it too.
+  // Only a pane moved: back to that pane too.
+  nb = bar(); await press(nb, "w"); await press(nb, "shift-j"); host.calls = [];
+  await press(nb, "escape");
+  assert.deepEqual(host.calls, home);
+  // Esc before any move: nothing to undo.
+  nb = bar(); await press(nb, "w"); await press(nb, "escape");
+  assert.deepEqual([host.calls, on()], [[], null], "nothing moved: nothing to undo");
+  // What it started on has gone: back to what's left of it.
   nb = bar(); await press(nb, "w"); await press(nb, "j");
+  const gone = spaces[0].tabs.splice(0, 1)[0]; host.calls = [];
+  await press(nb, "escape");
+  assert.deepEqual(host.calls, [home[0], home[2]], "its tab closed: the space and pane only");
+  spaces[0].tabs.splice(0, 0, gone);
+  // Enter or any other key, bound (x is pane.close, w again) or not (q): you stay where
+  // you are, and that key does nothing else.
+  for (const k of ["enter", "x", "w", "q"]) {
+    nb = bar(); await press(nb, "w"); await press(nb, "j");
+    assert.equal(on(), "s1");
+    host.calls = [];
+    await press(nb, k);
+    assert.deepEqual([host.calls, host.closed, on()], [[], ["oN"], null], `${k}: you stay`);
+  }
+  // A click outside the bar stays too; the bar going any other way clears the mark.
+  nb = bar(); await press(nb, "w"); await press(nb, "j"); host.calls = [];
   withId(nb.render(cx2), "prefix-layer").handlers["on_mouse_down:left"]({}, cx2);
-  assert.deepEqual([host.closed, on()], [["oN"], null]);
+  assert.deepEqual([host.calls, host.closed, on()], [[], ["oN"], null]);
   nb = bar(); await press(nb, "w"); await press(nb, "j");
   await nb.close();
   assert.equal(on(), null);
@@ -1979,7 +2028,7 @@ console.log("PASS: the ^b bar (every layout) lists g lazygit (it works everywher
   host.focused = null; host.props = {};
   host.shared.set("ram.zoom", "space"); host.shared.set("layout", "ram");
 }
-console.log("PASS: ^b w is navigate mode: j/k (they come as their keys.json actions) through the spaces, Enter goes, Esc or any other key cancels; RAM, Traveler and Night City mark the one it's on, the bar names it");
+console.log("PASS: ^b w is navigate mode, each move shown at once: j/k the spaces, h/l the tabs, H J K L the panes (they come as their keys.json actions); Enter or any other key stays, Esc goes back; RAM, Traveler and Night City mark the space it's on, the bar names it and the tab");
 // Night City's footer writes its keys the same way.
 if (await has("mods/night-city/main.js"))
   assert((await read("mods/night-city/main.js")).includes('shortcut(command).replace(/\\bctrl-/g, "^")'), "Night City shows ^b too");
