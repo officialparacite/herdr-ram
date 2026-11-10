@@ -1345,121 +1345,114 @@ assert.equal(keysFile[`mod:${BAR}`].f, `${BAR}.ram.follow`);
 Object.assign(agentList[3], { status: "idle" }); Object.assign(agentList[5], { status: "blocked" });
 Object.assign(agentList[6], { status: "idle" }); Object.assign(agentList[8], { status: "idle" });
 raw.forEach((r, i) => { if (i < 10) r.status_ms = now - i * 1000; });
-// The way back: a second after nothing needs you any more, follow shows the tab
-// you were on before its first move. A fresh strip copy, so nothing above carries
-// over; the clock is moved on by hand (later).
+// The way back: when you answer the last agent that needed you, follow goes
+// straight back to the tab you were on before its first move. A fresh strip
+// copy, so nothing above carries over; the clock is moved on by hand (later).
 {
   const realNow = Date.now;
   let skew = 0;
   Date.now = () => realNow() + skew;
   const later = ms => { skew += ms; };
-  const before = host.timers.length;
   const fb = view({});
   fb.size = { width: 1600, height: 700 };
-  const tick = host.timers.slice(before)[1];
-  assert.equal(tick.ms, 250, "the strip's 250 ms tick (the side column's edge) checks the way back");
   const FB = async () => { R(fb, {}); await settle(); };
   const selects = () => host.calls.filter(c => c.name === "space.select" || c.name === "tab.select");
   const back = [{ name: "space.select", args: { id: "s3" } }, { name: "tab.select", args: { id: "tab3-1" } }];
   const t2 = agentList[1], t6 = agentList[5];
   const ask = (a, i) => { a.status = "blocked"; raw[i].status_ms = Date.now(); };
+  const focus = terminal => ({ name: "agent.focus", args: { terminal } });
   host.shared.set("ram.zoom", "meta"); host.shared.set("ram.follow", true);
   // Only t6 (web *1) needs you; you're on docs &2.
   t2.status = "idle";
   show("s3", "tab3-1"); host.calls = [];
   await FB();
-  assert.deepEqual(focusCalls(), [{ name: "agent.focus", args: { terminal: "t6" } }]);
+  assert.deepEqual(focusCalls(), [focus("t6")]);
   show("s1", "tab1-0"); await FB();
+  assert.deepEqual(selects(), [], "it waits for your answer");
   t6.status = "working"; await FB();
-  tick.fn(cx);
-  assert.deepEqual(selects(), [], "answered: not back at once");
-  later(1100); tick.fn(cx);
-  assert.deepEqual(selects(), back, "a second later: back to docs &2");
+  assert.deepEqual(selects(), back, "answered: straight back to docs &2");
   show("s3", "tab3-1"); host.calls = [];
-  later(1100); tick.fn(cx);
+  await FB();
   assert.deepEqual(selects(), [], "only once");
-  // It asks again within the second: you stay, and go back a second after the
-  // last answer (not the first).
+  // It asks again once you're back: shown again at once.
   ask(t6, 5); await FB();
-  assert.deepEqual(focusCalls(), [{ name: "agent.focus", args: { terminal: "t6" } }]);
+  assert.deepEqual(focusCalls(), [focus("t6")], "asked again: straight to it");
+  // It asks again before the move back has shown: not missed.
   show("s1", "tab1-0"); await FB();
-  t6.status = "working"; await FB();
-  later(400); ask(t6, 5); await FB();
-  later(1100); tick.fn(cx);
-  assert.deepEqual(selects(), [], "it asked again straight away: you stay there");
-  t6.status = "working"; await FB();
-  later(300); tick.fn(cx);
-  assert.deepEqual(selects(), [], "0.3 s after the last answer: not yet");
-  later(800); tick.fn(cx);
-  assert.deepEqual(selects(), back, "answered again: back");
-  // Asked and answered again inside the second, with no tick between: the
-  // second counts from the last answer.
-  show("s3", "tab3-1"); host.calls = [];
-  ask(t6, 5); await FB();
-  show("s1", "tab1-0"); await FB();
-  t6.status = "working"; await FB();
-  later(400); ask(t6, 5); await FB();
-  later(400); t6.status = "working"; await FB();
-  later(300); tick.fn(cx);
-  assert.deepEqual(selects(), [], "a second from the last answer, not the first");
-  later(800); tick.fn(cx);
+  t6.status = "working"; host.calls = []; await FB();
   assert.deepEqual(selects(), back);
-  // An ask the strip hasn't drawn yet holds you too.
-  show("s3", "tab3-1"); host.calls = [];
   ask(t6, 5); await FB();
+  assert.deepEqual(focusCalls(), [], "still on web *1: nothing is decided before the move back shows");
+  show("s3", "tab3-1"); await FB();
+  assert.deepEqual(focusCalls(), [focus("t6")], "then it's shown again, though it asked before you got back");
   show("s1", "tab1-0"); await FB();
   t6.status = "working"; await FB();
-  later(1100); t6.status = "blocked"; tick.fn(cx);
-  assert.deepEqual(selects(), [], "it needs you again (not drawn yet): you stay");
-  raw[5].status_ms = Date.now(); await FB();
+  show("s3", "tab3-1"); await FB(); host.calls = [];
+  // Answered before follow's move has shown: back once it shows.
+  ask(t6, 5); await FB();
+  assert.deepEqual(focusCalls(), [focus("t6")]);
   t6.status = "working"; await FB();
-  later(1100); tick.fn(cx);
-  assert.deepEqual(selects(), back);
+  assert.deepEqual(selects(), [], "not before follow's move shows");
+  show("s1", "tab1-0"); await FB();
+  assert.deepEqual(selects(), back, "it showed with nothing needing you: straight back");
+  show("s3", "tab3-1"); await FB(); host.calls = [];
   // Two agents one after the other: back to where you were before the first.
-  show("s3", "tab3-1"); host.calls = [];
   ask(t2, 1); raw[1].status_ms -= 5000; ask(t6, 5); await FB();
-  assert.deepEqual(focusCalls(), [{ name: "agent.focus", args: { terminal: "t2" } }], "t2 waited longest");
+  assert.deepEqual(focusCalls(), [focus("t2")], "t2 waited longest");
   show("s0", "tab0-1"); await FB();
   t2.status = "idle"; await FB();
-  assert.deepEqual(focusCalls().at(-1), { name: "agent.focus", args: { terminal: "t6" } }, "then t6");
+  assert.deepEqual(focusCalls().at(-1), focus("t6"), "then t6");
+  assert.deepEqual(selects(), [], "not back while t6 needs you");
   show("s1", "tab1-0"); await FB();
   t6.status = "working"; await FB();
-  later(1100); tick.fn(cx);
   assert.deepEqual(selects(), back, "back to docs &2, not to api &2");
+  show("s3", "tab3-1"); await FB(); host.calls = [];
   // Your tab closed meanwhile: you stay on the one you answered in.
-  show("s3", "tab3-1"); host.calls = [];
   ask(t6, 5); await FB();
   show("s1", "tab1-0"); await FB();
   const docs = spaces[3], gone = docs.tabs.splice(1, 1)[0];
   t6.status = "working"; await FB();
-  later(1100); tick.fn(cx);
   assert.deepEqual(selects(), [], "docs &2 closed: you stay");
   docs.tabs.splice(1, 0, gone);
   // You picked another tab yourself after follow's move: it leaves you there.
-  show("s3", "tab3-1"); host.calls = [];
+  show("s3", "tab3-1"); await FB(); host.calls = [];
   ask(t6, 5); await FB();
   show("s1", "tab1-0"); await FB();
   show("s0", "tab0-0"); await FB();
   t6.status = "working"; await FB();
-  later(1100); tick.fn(cx);
   assert.deepEqual(selects(), [], "you moved: no way back");
   // Even when you go back to that agent's tab yourself before you answer.
-  show("s3", "tab3-1"); host.calls = [];
+  show("s3", "tab3-1"); await FB(); host.calls = [];
   ask(t6, 5); await FB();
   show("s1", "tab1-0"); await FB();
   show("s0", "tab0-0"); await FB();
   show("s1", "tab1-0"); await FB();
   t6.status = "working"; await FB();
-  later(1100); tick.fn(cx);
   assert.deepEqual(selects(), [], "you picked its tab yourself: you stay");
   // follow turned off: no way back either.
-  show("s3", "tab3-1"); host.calls = [];
+  show("s3", "tab3-1"); await FB(); host.calls = [];
   ask(t6, 5); await FB();
   show("s1", "tab1-0"); await FB();
   host.shared.set("ram.follow", false); await FB();
   t6.status = "working"; await FB();
-  later(1100); tick.fn(cx);
   assert.deepEqual(selects(), [], "follow off: you stay");
+  // The move back never shows: 3 s on, follow looks at what needs you again.
+  host.shared.set("ram.follow", true);
+  show("s3", "tab3-1"); await FB(); host.calls = [];
+  ask(t6, 5); await FB();
+  show("s1", "tab1-0"); await FB();
+  t6.status = "working"; await FB();
+  ask(t2, 1); await FB();
+  assert.deepEqual(focusCalls(), [focus("t6")], "t2 waits while the move back is out");
+  later(3100); await FB();
+  assert.deepEqual(focusCalls().at(-1), focus("t2"), "3 s on: t2 is shown");
+  // follow turned off while a move back is out (it never shows), then on: it
+  // decides at once.
+  show("s0", "tab0-1"); await FB();
+  t2.status = "idle"; await FB();
+  host.shared.set("ram.follow", false); await FB();
+  host.shared.set("ram.follow", true); ask(t6, 5); host.calls = []; await FB();
+  assert.deepEqual(focusCalls(), [focus("t6")], "off and on again: no move back left over");
   Date.now = realNow;
   Object.assign(t2, { status: "blocked" }); Object.assign(t6, { status: "blocked" });
   raw.forEach((r, i) => { if (i < 10) r.status_ms = now - i * 1000; });
@@ -1468,7 +1461,7 @@ raw.forEach((r, i) => { if (i < 10) r.status_ms = now - i * 1000; });
 show("s0", "tab0-0");
 host.shared.set("ram.from", { s0: "tab0-0" });
 host.shared.set("ram.zoom", "space"); host.calls = [];
-console.log("PASS: follow (meta, its f under the sticks' +): shows the agent waiting longest, waits while yours needs you, moves on once answered, never undoes your own pick, and a second after the last answer goes back to your tab (unless it closed or you moved); ^b f");
+console.log("PASS: follow (meta, its f under the sticks' +): shows the agent waiting longest, waits while yours needs you, moves on once answered, never undoes your own pick, and goes straight back to your tab after the last answer (unless it closed or you moved), without missing an agent that asks again; ^b f");
 
 // ---- Hunk level -------------------------------------------------------------------
 // hunk.js on its own: what each menu item runs, what a review is called, notes.

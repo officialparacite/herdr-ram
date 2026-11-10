@@ -35,9 +35,6 @@ import { AMBER, CYAN, GOLD, GREEN, RED, ROM, ROM_LINE, ROM_BG, ROM_HOVER, U, CEL
 const HEADER_H = 19 * U, LABELS_H = 13 * U, FRAME_H = 18 * U, BOTTOM_H = 21 * U, PINS_H = 6 * U, HEAP_H = 20 * U;
 const BLOCK_H = 14 * U, KID_H = 12 * U, CHAR_W = 7 * U;
 const REGION_MIN_W = 160 * U, REGION_MAX_W = 360 * U, REGION_GAP = 14 * U, NEW_W = 30 * U;
-// follow takes you back to your tab once nothing has needed you for this long
-// (an agent that asks again straight away keeps you where you are).
-const FOLLOW_BACK_MS = 1000;
 const SP_W = 24 * U, NUM_W = 26 * U, ARROW_W = 26 * U;
 // The head of a frame's arrow (its line is a div): drawn, so it sits exactly on the line.
 const ARROW_HEAD = "mods/ram/arrow.svg";
@@ -250,13 +247,14 @@ export default class Ram extends View {
     if (role) return;
     // A drag on the side column's edge is kept for the level it was made in
     // (watchSide, keepSide). Only an active window can be dragged.
-    // follow's way back (followBack) waits on the same tick.
+    // follow's trip (where it took you, and the tab to go back to) and its
+    // move back while that hasn't shown yet (follow(), goBack()).
     this.trip = null;
+    this.backTo = null;
     cx.timer.every(250, () => {
       if (!window()?.active) return;
       this.watchSide(level());
       this.keepSide();
-      this.followBack();
     });
     // The open hunk reviews: polled here, shared with the other copies as
     // "ram.hunk.sessions".
@@ -598,11 +596,12 @@ export default class Ram extends View {
   // space and tab, so the region lights up and the terminal below is that
   // agent. While the agent in the shown tab needs you too, follow waits, and
   // moves on to the next once you've answered (the one waiting longest first).
-  // Once nothing has needed you for FOLLOW_BACK_MS, it takes you back to the
-  // tab you were on before its first move (this.trip), unless that tab has
-  // closed: then you stay. It only acts on those changes, so picking a tab
-  // yourself is never undone: that also drops a wait and the way back. The
-  // main stick never moves.
+  // When you answer the last one, it goes straight back to the tab you were on
+  // before its first move (this.trip), unless that tab has closed: then you
+  // stay. An agent that asks again is shown again at once, even if it asks
+  // before the move back has shown (this.backTo). It only acts on those
+  // changes, so picking a tab yourself is never undone: that also drops a
+  // wait and the way back. The main stick never moves.
   follow(data, cx) {
     const on = shared("ram.follow") === true && level() === "meta";
     const now = new Map(data.list.filter(a => a.status === "blocked" && !a.child && a.pane)
@@ -611,27 +610,33 @@ export default class Ram extends View {
     const seen = on && !this.followOn ? new Map() : this.followSeen ?? new Map();
     this.followSeen = now;
     this.followOn = on;
-    if (!on) { this.followWait = null; this.trip = null; return; }
+    if (!on) { this.followWait = null; this.trip = null; this.backTo = null; return; }
     const s = activeSpace(), tab = s?.tabs.find(t => t.active);
+    // The move back hasn't shown yet: nothing is decided on the tab it's
+    // leaving. Once it shows (or 3 s on, if it never does), follow looks at
+    // everything that needs you again, so an ask in between isn't missed.
+    let again = false;
+    if (this.backTo) {
+      if (tab?.id !== this.backTo.tab && Date.now() - this.backTo.sent < 3000) return;
+      this.backTo = null;
+      again = true;
+    }
     this.watchTrip(tab);
-    // Something needs you again: not back yet.
-    if (now.size && this.trip) this.trip.clear = 0;
+    // On the tab follow took you to, with nothing needing you any more (you
+    // answered, or it was answered before you got there): straight back.
+    if (this.trip?.arrived && !now.size) { this.followWait = null; this.goBack(cx); return; }
     if (this.followWait && tab?.id !== this.followWait) this.followWait = null;
     const fresh = [...now].some(([address, ms]) => seen.get(address) !== ms);
     const answered = [...seen.keys()].some(address => !now.has(address));
-    if (!fresh && !answered && !this.followWait) return;
+    if (!fresh && !answered && !this.followWait && !again) return;
     const blocked = data.list.filter(a => now.has(a.address));
-    if (!blocked.length) {
-      this.followWait = null;
-      if (this.trip?.arrived && !this.trip.clear) this.trip.clear = Date.now();
-      return;
-    }
+    if (!blocked.length) { this.followWait = null; return; }
     if (tab && blocked.some(a => a.tab === tab.id)) { this.followWait = tab.id; return; }
     this.followWait = null;
     const next = blocked.sort((a, b) => (a.status_ms ?? 0) - (b.status_ms ?? 0) || a.address.localeCompare(b.address))[0];
     // The first move remembers where you were; the moves after it keep that.
     if (!this.trip && s && tab) this.trip = { home: { space: s.id, tab: tab.id } };
-    if (this.trip) Object.assign(this.trip, { to: next.tab, arrived: false, sent: Date.now(), clear: 0 });
+    if (this.trip) Object.assign(this.trip, { to: next.tab, arrived: false, sent: Date.now() });
     cx.spawn(async () => run("agent.focus", { terminal: next.address }));
   }
 
@@ -645,20 +650,16 @@ export default class Ram extends View {
     if (trip.arrived || Date.now() - trip.sent > 3000) this.trip = null;
   }
 
-  // From the strip's 250 ms tick: FOLLOW_BACK_MS after the last agent that
-  // needed you was answered (and nothing needs you since), back to the tab you
-  // were on before follow's first move. You stay where you are when you've
-  // moved since, or when that tab has closed.
-  followBack() {
+  // You answered the last agent that needed you, on the tab follow took you
+  // to (or it was answered before you got there): back to the tab you were on
+  // before its first move. You stay where you are when that tab has closed.
+  goBack(cx) {
     const trip = this.trip;
-    if (!trip?.clear || Date.now() - trip.clear < FOLLOW_BACK_MS) return;
-    if (readScene().list.some(a => a.status === "blocked" && !a.child && a.pane)) { trip.clear = 0; return; }
     this.trip = null;
-    if (shared("ram.follow") !== true || level() !== "meta") return;
-    if (activeSpace()?.tabs.find(t => t.active)?.id !== trip.to) return;
     const home = spaces().find(x => x.id === trip.home.space);
     if (!home?.tabs.some(t => t.id === trip.home.tab)) return;
-    this.go(home.id, trip.home.tab);
+    this.backTo = { tab: trip.home.tab, sent: Date.now() };
+    cx.spawn(async () => this.go(home.id, trip.home.tab));
   }
 
   goMeta() {
