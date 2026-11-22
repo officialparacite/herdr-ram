@@ -49,33 +49,44 @@ function newWorktree() {
 }
 
 // ^b g outside RAM (RAM opens its own: ram.git): lazygit in a new tab at the
-// repo of the terminal you're in, or that space's lazygit tab if one is open.
-// The terminal labels itself (ram.lazygit) so ^b g finds it again, and RAM
-// knows it as lazygit's tab. Not a repo: a note says so. Quitting lazygit
-// closes its tab.
+// repo of the terminal you're in, or the space's lazygit tab for that folder if
+// one is open. The terminal labels itself with its folder (ram.lazygit=<folder>)
+// so ^b g finds it again, and RAM knows it as lazygit's tab. Quitting lazygit
+// closes its tab. A folder that isn't in a repo gets RAM's GIT dialog first (the
+// ram mod, role git-init): what lazygit would ask there, as a menu.
+const same = (a, b) => Boolean(a && b) && a.replace(/(.)\/+$/, "$1") === b.replace(/(.)\/+$/, "$1");
+export const LAZY_ARGV = ["exec", "sh", "-c", 'hc label "$HC_TERMINAL_ID" "ram.lazygit=$PWD" >/dev/null 2>&1; exec lazygit'];
 export async function lazygitHere() {
   const f = focused();
   const s = spaces().find((x) => x.id === f?.space) ?? spaces().find((x) => x.active);
   if (!s) return;
-  const lazy = new Set(terminals().filter((t) => t.labels?.["ram.lazygit"]).map((t) => t.address));
-  const tabs = new Set(s.tabs.map((t) => t.id));
-  const open = panes().find((p) => tabs.has(p.tab) && p.terminal && lazy.has(p.terminal));
-  if (open) { run("tab.select", { id: open.tab }); return; }
   const cwd = panes().find((p) => p.pane === f?.pane)?.cwd || f?.cwd || s.folder || "";
-  let top = "";
+  // repo: true in one, false not in one, null when git couldn't be asked.
+  let top = cwd, repo = null;
   if (cwd) {
     try {
       const r = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on: s.machine ?? null });
-      if (r.code === 0) top = r.stdout.trim();
-    } catch (_) { /* a machine that can't be reached: same as no repo */ }
+      repo = r.code === 0 && Boolean(r.stdout.trim());
+      if (repo) top = r.stdout.trim();
+    } catch (_) { /* a machine that can't be reached: that folder, and lazygit asks */ }
   }
   if (!top) {
-    const where = cwd && cwd.startsWith(home()) ? "~" + cwd.slice(home().length) : cwd || s.name;
-    notify({ title: "Not a git repo", body: `${where} isn't in a git repository, so lazygit has nothing to open.`, level: "info", timeout: 4000 });
+    notify({ title: "Nowhere for lazygit", body: `${s.name} has no folder yet.`, level: "info", timeout: 4000 });
     return;
   }
-  run("tab.new", { space: s.id, name: "lazygit", folder: top,
-    argv: ["exec", "sh", "-c", 'hc label "$HC_TERMINAL_ID" ram.lazygit=1 >/dev/null 2>&1; exec lazygit'] });
+  const tabs = new Set(s.tabs.map((t) => t.id));
+  const open = panes().find((p) => {
+    if (!tabs.has(p.tab) || !p.terminal) return false;
+    const v = terminals().find((t) => t.address === p.terminal)?.labels?.["ram.lazygit"];
+    return Boolean(v) && same(v === "1" ? p.cwd ?? "" : v, top);
+  });
+  if (open) { run("tab.select", { id: open.tab }); return; }
+  if (repo === false) {
+    openOverlay({ mod: "ram", kind: "dialog", width: 520, height: 340,
+      props: { role: "git-init", space: s.id, name: s.name, folder: top, machine: s.machine ?? null } });
+    return;
+  }
+  run("tab.new", { space: s.id, name: `lazygit ${top.replace(/\/+$/, "").split("/").pop()}`, folder: top, argv: LAZY_ARGV });
 }
 
 // ^b / outside RAM (RAM opens its own: ram.rg): rg-fzf in a new tab at the repo
@@ -84,7 +95,7 @@ export async function lazygitHere() {
 // what you pick stays printed and the tab turns into your shell; Esc (nothing
 // picked) closes the tab.
 export const RG_TAB = [
-  '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" ram.rg=1 >/dev/null 2>&1',
+  '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" "ram.rg=$PWD" >/dev/null 2>&1',
   'out=$(rg-fzf); st=$?',
   '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" ram.rg= >/dev/null 2>&1',
   '[ -z "$out" ] && [ "$st" -eq 0 ] && exit 0',
@@ -104,14 +115,63 @@ export async function rgHere() {
       if (r.code === 0 && r.stdout.trim()) top = r.stdout.trim();
     } catch (_) { /* a machine that can't be reached: search the folder */ }
   }
-  run("tab.new", { space: s.id, name: "rg-fzf", ...(top ? { folder: top } : {}), argv: ["exec", "sh", "-c", RG_TAB] });
+  run("tab.new", { space: s.id, name: `rg-fzf ${(top || s.name).replace(/\/+$/, "").split("/").pop()}`, ...(top ? { folder: top } : {}), argv: ["exec", "sh", "-c", RG_TAB] });
 }
 
 // "pane.split:right" -> run("pane.split", { direction: "right" }); the value fills
 // the command's first argument, as in keys.json. Digits become numbers (indexes).
+// In RAM a space shows at its BP (its work tab, shared "ram.bp"), as clicking
+// it does: navigate mode and ^b ( ) go there. Elsewhere, the space as it is.
+export function showSpace(s) {
+  if (!s) return null;
+  const bp = shared("layout") === "ram" ? shared("ram.bp")?.[s.id] : null;
+  const tab = bp && s.tabs.find((t) => t.id === bp);
+  if (tab) run("tab.select", { id: tab.id }); else run("space.select", { id: s.id });
+  return tab?.id ?? s.tabs.find((t) => t.active)?.id ?? null;
+}
+
+// The space you're in, and the tab it shows.
+function here() {
+  const f = focused(), list = spaces();
+  const s = list.find((x) => x.id === f?.space) ?? list.find((x) => x.active);
+  return { list, s, tab: s?.tabs.find((t) => t.id === f?.tab) ?? s?.tabs.find((t) => t.active) };
+}
+
+// ^b < >: the tab one place left or right in its space; ^b { }: the space one
+// place earlier or later (Herdr keeps a space among its machine's).
+function shiftTab(by) {
+  const { s, tab } = here();
+  const i = s?.tabs.findIndex((t) => t.id === tab?.id) ?? -1, to = i + by;
+  if (i < 0 || to < 0 || to >= s.tabs.length) return;
+  run("tab.move", { id: tab.id, index: to + 1 });
+}
+function shiftSpace(by) {
+  const { list, s } = here();
+  const i = list.findIndex((x) => x.id === s?.id), to = i + by;
+  if (i < 0 || to < 0 || to >= list.length) return;
+  run("space.move", { id: s.id, index: to + 1 });
+}
+
+// ^b C: the menu of what to start in a new tab (a terminal or an agent), as
+// the + after the tabs opens it.
+function newMenu() {
+  const { s } = here();
+  if (s && !s.active) run("space.select", { id: s.id });
+  openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 });
+}
+
 function runCommand(text) {
   const at = text.indexOf(":");
   const name = at < 0 ? text : text.slice(0, at);
+  if (name === "tab.left" || name === "tab.right") return shiftTab(name === "tab.left" ? -1 : 1);
+  if (name === "space.earlier" || name === "space.later") return shiftSpace(name === "space.earlier" ? -1 : 1);
+  if (name === "newmenu") return newMenu();
+  if ((name === "space.next" || name === "space.prev") && shared("layout") === "ram") {
+    const { list, s } = here();
+    const i = list.findIndex((x) => x.id === s?.id), n = list.length;
+    if (n) showSpace(list[(((i + (name === "space.next" ? 1 : -1)) % n) + n) % n]);
+    return;
+  }
   if (name === "passthrough") {
     const term = focused()?.terminal;
     if (term) hc(["keys", term, "ctrl+b"]).catch(() => {});
@@ -146,25 +206,27 @@ function keysFor(action) {
 
 // Areas in the order they're shown.
 const AREAS = [
-  ["tabs", /^tab\./],
+  ["tabs", /^(tab\.|newmenu$)/],
   ["spaces", /^(space\.|worktree$|navigate$|mod\.open:picker$)/],
   ["panes", /^pane\./],
   ["agents", /^agent\./],
   ["git", /^lazygit$/],
   ["search", /^rg$/],
-  ["levels", /^ram\./],
+  ["RAM", /^ram\./],
   ["app", /./],
 ];
 // Labels for known actions; this order is also the order hints appear in.
 const LABELS = {
-  "tab.select": "go to", "tab.new": "new", "tab.next": "next", "tab.prev": "prev",
-  "tab.rename": "rename", "tab.close": "close tab",
-  "navigate": "navigate", "space.new": "new", "space.next": "next", "space.prev": "prev", "space.rename": "rename",
+  "tab.select": "go to", "tab.new": "new", "newmenu": "new\u2026", "tab.next": "next", "tab.prev": "prev",
+  "tab.left": "move \u2190", "tab.right": "move \u2192", "tab.rename": "rename", "tab.close": "close tab",
+  "navigate": "navigate", "space.new": "new", "space.next": "next", "space.prev": "prev",
+  "space.earlier": "move \u2191", "space.later": "move \u2193", "space.rename": "rename",
   "space.close": "close space", "worktree": "new worktree", "mod.open:picker": "picker",
   "pane.go": "focus", "pane.swap": "swap", "pane.split:right": "split right",
   "pane.split:down": "split down", "pane.close": "close pane", "pane.zoom": "zoom",
   "agent.next": "next", "agent.prev": "prev", "lazygit": "lazygit", "rg": "rg-fzf",
-  "ram.meta": "meta", "ram.space": "space", "ram.hunk": "hunk", "ram.follow": "follow", "ram.changes": "diff",
+  "ram.meta": "meta", "ram.space": "space", "ram.hunk": "hunk", "ram.follow": "follow", "ram.enter": "enter",
+  "ram.bp": "BP here", "ram.peek": "peek", "ram.changes": "diff",
   "app.palette": "palette", "app.help": "all keys", "app.settings": "settings",
   "layout.toggle:sidebar": "sidebar", "layout.switch": "layout", "app.zoom_in": "bigger",
   "app.zoom_out": "smaller", "app.zoom_reset": "normal size", "passthrough": "send ^b",
@@ -290,8 +352,7 @@ export default class Prefix extends View {
   }
 
   // BY spaces on, round the ends (from the shown one if its space has gone), and
-  // show it. Its tabs start from the one it shows (moveTab: the last tab moved to
-  // isn't one of them).
+  // show it (in RAM at its BP, showSpace()). Its tabs start from the one it shows.
   moveNav(by) {
     const list = spaces();
     if (!list.length) return;
@@ -300,7 +361,7 @@ export default class Prefix extends View {
     const next = list[(((i + by) % list.length) + list.length) % list.length];
     this.pointAt(next.id);
     this.moved = true;
-    run("space.select", { id: next.id });
+    this.navTab = showSpace(next);
   }
 
   // BY tabs on in the space it's on, round the ends, skipping settled tabs (as

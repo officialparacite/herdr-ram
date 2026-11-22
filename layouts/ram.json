@@ -22,6 +22,7 @@
     "angle": 180
   },
   "preview": "layouts/ram.svg",
+  "terminal_menu": "ram-menu",
   "resizable": false,
   "children": [
     {

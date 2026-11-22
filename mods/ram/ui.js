@@ -12,7 +12,8 @@ export const U = 1.25;
 // A block's status light and its cell.
 export const LED = { working: GREEN, blocked: RED, done: CYAN, idle: "#5f8a70", shell: "#5b6b61",
   mod: "#9cb8cb", dead: "#33443a", unavailable: "#4f6b5a" };
-export const CELL = { working: "#123322", blocked: "#3a1118", done: "#0f2c2a", idle: "#0f1a14", shell: "#121a15",
+// A finished agent's cell is the brightest after a fault's, so it stands out on a stick.
+export const CELL = { working: "#123322", blocked: "#3a1118", done: "#12423c", idle: "#0f1a14", shell: "#121a15",
   mod: "#121a15", dead: "#0b0f0d", unavailable: "#121a15" };
 const LABEL = { working: "working", blocked: "needs you", done: "done, unseen",
   idle: "idle", shell: "shell", mod: "mod", dead: "dead, confirmed exit", unavailable: "unavailable" };
@@ -43,6 +44,10 @@ export function identity(a) {
   const where = [a.space_name, a.tab_name].filter(Boolean).join(" / ");
   return [a.title || a.program?.name || "terminal", where, LABEL[a.status] || "unreported"].filter(Boolean).join(" \u00b7 ");
 }
+// A heap row's or a block's tooltip: a command's (procs.js) also says a click peeks at it.
+export const tipOf = a => a.proc ? `${a.program?.name ?? "command"}: ${identity(a)} \u00b7 click: peek at its output` : identity(a);
+// follow's return address (RET\u25b8): SP's amber, dimmed.
+export const RET_DIM = AMBER + "88";
 
 // The key bar's mod (its NAME): its keys are keys.json's mod:<BAR> section.
 export const BAR = "ram-prefix";
@@ -57,7 +62,8 @@ export function shortcut(command) {
   const second = all.filter(k => k.section === `mod:${BAR}` && k.action === `${BAR}.${command}`).map(k => k.keys);
   if (!prefix || !second.length) return "";
   const plain = second.filter(k => !k.startsWith("shift-")).sort((a, b) => a.length - b.length)[0];
-  return `${prefix.keys} ${plain ?? second[0]}`;
+  // One spelling per key, as the bar writes it: "shift-p" is P.
+  return `${prefix.keys} ${(plain ?? second[0]).replace(/^shift-([a-z])$/, (_, c) => c.toUpperCase())}`;
 }
 
 // A status light; it pulses while working or blocked (MOTION: the window is active).
@@ -75,6 +81,32 @@ export function fault(n, compact = false) {
     .text_size((compact ? 10 : 10.5) * U).text_color(RED);
   return compact ? el.tooltip(`FAULT ${n}: needs you`).child(`!${n}`) : el.child(`FAULT ${n}`);
 }
+// A space's finished agents and commands you haven't looked at yet: +n in done's
+// cyan, boxed (the sticks' dim +n counts blocks that don't fit; ✓ is git's clean).
+export const DONE_BG = "#12423c";
+export function finished(n) {
+  return div().flex_none().px(3 * U).rounded(2).bg(DONE_BG).border(1).border_color(CYAN)
+    .text_size(10 * U).text_color(CYAN).tooltip(`${n} finished while you weren't looking`).child(`+${n}`);
+}
+export const finishedW = n => textW(`+${n}`, 10 * U) + 6 * U + 2;
+
+// The pointers' marks: SP (amber, the tab meta shows) and BP (white: the space
+// you work in; dim: the others' work tabs).
+export const BP_ON = "#ffffff";
+
+// How long ago, short: now, 5m, 2h, 3d.
+export function ago(ms, now = Date.now()) {
+  const s = Math.max(0, Math.floor((now - ms) / 1000));
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
+// /private/tmp and /tmp are the same folder on macOS (hunk reports the first),
+// and a folder is the same with or without its last slash.
+export const realDir = p => String(p ?? "").replace(/^\/private(?=\/(?:tmp|var)(?:\/|$))/, "").replace(/(.)\/+$/, "$1");
+export const sameDir = (a, b) => Boolean(a && b) && realDir(a) === realDir(b);
 
 // Git marks (git.js summary()): ↑ push, ↓ pull, ± uncommitted, ⌂ no remote, ✓ clean.
 const MARK = { push: () => GREEN, pull: () => RED, dirty: t => t.ansi3, local: t => t.ansi1, clean: () => LED.idle };

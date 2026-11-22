@@ -19,7 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.expanduser(os.environ.get("RAM_SRC", os.path.dirname(HERE)))
 COPY = "/tmp/ram-mut"
 PARTS = ["keys.json", ".gitignore", "RECIPE.md", "layouts", "themes", "mods/ram", "mods/prefix", "mods/text-bigger",
-         "mods/text-smaller", "mods/ram-prefix", "mods/ram-text-bigger", "mods/ram-text-smaller",
+         "mods/text-smaller", "mods/ram-menu", "mods/ram-prefix", "mods/ram-text-bigger", "mods/ram-text-smaller",
          "mods/night-city", "mods/traveler-spaces"]
 
 
