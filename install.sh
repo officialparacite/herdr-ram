@@ -15,7 +15,7 @@ home=${HERDR_APP_HOME:-$HOME/.config/herdr-app}
 nvim_dir=${XDG_CONFIG_HOME:-$HOME/.config}/nvim
 stamp=$(date +%Y%m%d%H%M%S)
 backup="$home/.backup-ram-$stamp"
-mods=(ram prefix text-bigger text-smaller)
+mods=(ram ram-menu prefix text-bigger text-smaller)
 want_nvim=0 switch=1
 for arg in "$@"; do
   case $arg in

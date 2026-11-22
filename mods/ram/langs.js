@@ -8,7 +8,7 @@
 // mode), kept as shared "ram.lang.include" for every repo. Vendored and
 // generated files (node_modules/, vendor/, lock files, *.min.js) never count.
 import { div } from "gpui-kit";
-import { h_flex, v_flex } from "gpui-base";
+import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { exec, props, closeOverlay, theme, shared, setShared, run, settings } from "herdr";
 import { AMBER, CYAN, U, stop } from "./ui.js";
 import { READ } from "./git.js";
@@ -230,7 +230,8 @@ export function openFile(space, top, path) {
 // The dialog (role "lang"; props: space, top, machine, repo, mode, lang). Modes:
 // "list" every language that counts (a click shows its files), "files" one
 // language's files (a click opens one in $EDITOR), "ext" the picker of what else
-// counts. It reads the repo itself.
+// counts. It reads the repo itself. The keyboard does what clicks do: ↑↓ pick a
+// row, Enter acts on it, Backspace or ← goes back to every language, Esc closes.
 export class LangView {
   constructor(cx) {
     const p = props() ?? {};
@@ -238,16 +239,45 @@ export class LangView {
     this.lang = p.lang ?? null;
     this.files = undefined;
     this.width = 480;
+    this.at = 0;
+    this.acts = [];
+    this.handle = cx.focus_handle();
+    this.handle.focus();
+    cx.timer.after(50, () => this.handle.focus());
+    this.scroller = ScrollHandle.new();
     cx.spawn(async cx => {
       this.files = await readFiles(p.machine, p.top) ?? [];
       cx.notify();
     });
   }
 
+  // A mode, from the start of its list.
+  to(mode, lang = this.lang) { this.mode = mode; this.lang = lang; this.at = 0; }
+
+  key(e, cx) {
+    const k = e.key, n = this.acts.length;
+    if (k === "down") this.at = Math.max(0, Math.min(n - 1, this.at + 1));
+    else if (k === "up") this.at = Math.max(0, this.at - 1);
+    else if (k === "enter") this.acts[this.at]?.(cx);
+    else if ((k === "backspace" || k === "left") && this.mode !== "list") this.to("list");
+    else if (k === "escape") { const o = props()?.overlay; if (o) closeOverlay(o); }
+    else return;
+    cx.stop_propagation();
+    this.scroller.scroll_to_item(this.at);
+    cx.notify();
+  }
+
   render() {
     const t = theme(), p = props() ?? {}, include = shared(INCLUDE) ?? [];
     const close = () => { if (p.overlay) closeOverlay(p.overlay); };
+    this.acts = [];
+    const act = (fn, el) => {
+      const k = this.acts.length;
+      this.acts.push(fn);
+      return k === this.at ? el.bg(AMBER + "1f") : el;
+    };
     const box = v_flex().id("lang-view").size_full().p(10 * U).gap(6 * U).bg(t.popover)
+      .track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
       .on_size_change((size, cx) => {
         const w = size.width / (settings()?.zoom || 1);
         if (Math.abs(w - this.width) >= 1) { this.width = w; cx.notify(); }
@@ -256,54 +286,56 @@ export class LangView {
       .child(div().flex_none().text_size(12.5 * U).font_semibold().text_color(CYAN).child(title))
       .child(div().flex_1().min_w(0).truncate().text_size(11.5 * U).text_color(t.muted).child(extra));
     const hint = text => div().flex_none().text_size(10.5 * U).text_color(t.dim).child(text);
-    const scroll = rows => v_flex().id("lang-rows").flex_1().min_h(0).overflow_y_scrollbar().children(rows);
+    const scroll = rows => v_flex().id("lang-rows").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(this.scroller).children(rows);
     if (this.files === undefined) return box.child(head("LANG", p.repo ?? "")).child(hint("Reading the repo\u2026"));
-    if (this.mode === "ext") return this.picker(box, head, hint, scroll, include);
+    if (this.mode === "ext") return this.picker(box, head, hint, scroll, include, act);
     const list = summarize(this.files, include);
     const one = this.mode === "files" ? list.find(l => l.name === this.lang) : null;
     if (one) {
-      const rows = one.files.map((f, k) => h_flex().id(`lang-file-${k}`).h(20 * U).flex_none().px(6 * U).gap(8 * U).items_center()
+      const rows = one.files.map((f, k) => act(() => { openFile(p.space, p.top, f.path); close(); },
+        h_flex().id(`lang-file-${k}`).h(20 * U).flex_none().px(6 * U).gap(8 * U).items_center()
         .rounded(2).cursor_pointer().hover(st => st.bg(t.hover))
         .tooltip(`${f.path}: open in $EDITOR`)
         .on_mouse_down("left", stop)
         .on_click((_e, cx) => { cx.stop_propagation(); openFile(p.space, p.top, f.path); close(); })
         .child(div().flex_1().min_w(0).truncate().text_size(11.5 * U).text_color(t.foreground).child(f.path))
-        .child(div().flex_none().text_size(10.5 * U).text_color(t.dim).child(sizeText(f.size))));
+        .child(div().flex_none().text_size(10.5 * U).text_color(t.dim).child(sizeText(f.size)))));
       return box
         .child(head(one.name, `${shareText(one.share)} \u00b7 ${filesText(one.count)} \u00b7 ${p.repo ?? ""}`)
           .child(div().id("lang-back").flex_none().px(6 * U).h(16 * U).flex().items_center().rounded(2).border(1).border_color(t.input)
             .text_size(10.5 * U).text_color(t.muted).cursor_pointer().hover(st => st.bg(t.hover).text_color(AMBER))
             .tooltip("Every language").on_mouse_down("left", stop)
-            .on_click((_e, cx) => { cx.stop_propagation(); this.mode = "list"; cx.notify(); }).child("\u2190 all")))
+            .on_click((_e, cx) => { cx.stop_propagation(); this.to("list"); cx.notify(); }).child("\u2190 all")))
         .child(scroll(rows))
-        .child(hint("Click a file: it opens in $EDITOR in a new tab \u00b7 Esc close"));
+        .child(hint("\u2191\u2193 choose \u00b7 Enter or a click: open in $EDITOR, in a new tab \u00b7 \u2190 every language \u00b7 Esc close"));
     }
-    const rows = list.map((l, k) => h_flex().id(`lang-row-${k}`).h(22 * U).flex_none().px(6 * U).gap(8 * U).items_center()
+    const rows = list.map((l, k) => act(() => this.to("files", l.name),
+      h_flex().id(`lang-row-${k}`).h(22 * U).flex_none().px(6 * U).gap(8 * U).items_center()
       .rounded(2).cursor_pointer().hover(st => st.bg(t.hover))
       .tooltip(`${l.name}: its ${filesText(l.count)}`)
       .on_mouse_down("left", stop)
-      .on_click((_e, cx) => { cx.stop_propagation(); this.mode = "files"; this.lang = l.name; cx.notify(); })
+      .on_click((_e, cx) => { cx.stop_propagation(); this.to("files", l.name); cx.notify(); })
       .child(div().size(8 * U).flex_none().rounded_full().bg(visible(l.color)))
       .child(div().flex_1().min_w(0).truncate().text_size(12 * U).font_semibold().text_color(t.foreground).child(l.name))
       .child(div().w(52 * U).flex_none().text_size(11 * U).text_color(t.muted).child(shareText(l.share)))
-      .child(div().w(64 * U).flex_none().text_size(10.5 * U).text_color(t.dim).child(filesText(l.count))));
+      .child(div().w(64 * U).flex_none().text_size(10.5 * U).text_color(t.dim).child(filesText(l.count)))));
     return box
       .child(head("LANG", `${p.repo ?? ""} \u00b7 by size`))
       .when(list.length > 0, el => el.child(langBar("lang-view-bar", list, Math.max(40, this.width - 20 * U), 8 * U)))
       .child(list.length ? scroll(rows) : hint("No code here yet: include more file types with ext"))
-      .child(hint("Click a language for its files \u00b7 Esc close"));
+      .child(hint("\u2191\u2193 choose \u00b7 Enter or a click: its files \u00b7 Esc close"));
   }
 
   // ext: the repo's data, prose and unknown file types; a click includes one in
   // every repo's LANG, or leaves it out again.
-  picker(box, head, hint, scroll, include) {
+  picker(box, head, hint, scroll, include, act) {
     const t = theme(), list = others(this.files, include);
     const toggle = key => {
       const now = new Set(shared(INCLUDE) ?? []);
       if (now.has(key)) now.delete(key); else now.add(key);
       setShared(INCLUDE, [...now].sort());
     };
-    const rows = list.map((o, k) => h_flex().id(`lang-ext-${k}`).h(22 * U).flex_none().px(6 * U).gap(8 * U).items_center()
+    const rows = list.map((o, k) => act(() => toggle(o.key), h_flex().id(`lang-ext-${k}`).h(22 * U).flex_none().px(6 * U).gap(8 * U).items_center()
       .rounded(2).cursor_pointer().hover(st => st.bg(t.hover))
       .tooltip(o.on ? `${o.key} counts: click to leave it out` : `Count ${o.key} too`)
       .on_mouse_down("left", stop)
@@ -315,10 +347,10 @@ export class LangView {
       .child(div().flex_none().text_size(12 * U).font_semibold().text_color(o.on ? AMBER : t.foreground).child(o.key))
       .child(div().flex_1().min_w(0).truncate().text_size(10.5 * U).text_color(t.dim).child(o.exts.join(" ")))
       .child(div().w(64 * U).flex_none().text_size(10.5 * U).text_color(t.dim).child(filesText(o.count)))
-      .child(div().w(56 * U).flex_none().text_size(10.5 * U).text_color(t.dim).child(sizeText(o.bytes))));
+      .child(div().w(56 * U).flex_none().text_size(10.5 * U).text_color(t.dim).child(sizeText(o.bytes)))));
     return box
       .child(head("LANG", "what else counts, in every repo"))
       .child(list.length ? scroll(rows) : hint("Everything in this repo counts already"))
-      .child(hint("Programming and markup always count, as on GitHub \u00b7 Esc close"));
+      .child(hint("\u2191\u2193 choose \u00b7 Enter or a click: count it or not \u00b7 programming and markup always count \u00b7 Esc close"));
   }
 }

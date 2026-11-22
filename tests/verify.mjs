@@ -120,6 +120,8 @@ const stub = url(`
   }
   export const div = () => node("div"), svg = x => node("svg").child(x), image = x => node("image").child(x);
   export const h_flex = () => node("h_flex"), v_flex = () => node("v_flex");
+  // A scroll position: the rows a test asked it to reveal (host.scrolls).
+  export const ScrollHandle = { new: () => ({ scroll_to_item(i) { (host.scrolls ??= []).push(i); }, release: () => true }) };
   // A virtual list draws every row here, so the tests see them all.
   export const v_virtual_list = (id, count, sizes, key, render) => {
     const n = node("v_flex"); n.ops.push(["id", id], ["virtual", count, sizes]);
@@ -157,16 +159,21 @@ const stub = url(`
   // Herdr does, unless host.layoutLag holds it back.
   export const layout = () => host.layout ?? null;
   const findNode = (n, id) => n?.id === id ? n : (n?.children ?? []).map(c => findNode(c, id)).find(Boolean) ?? null;
-  export const run = (name, args) => { host.calls.push({ name, args });
+  // host.events: runs and overlay closes in the order they happened.
+  export const run = (name, args) => { host.calls.push({ name, args }); (host.events ??= []).push("run " + name);
     const n = name === "layout.resize" && host.layout && !host.layoutLag ? findNode(host.layout, args.id) : null;
     if (n) n.size = args.px !== undefined ? { px: args.px } : { weight: args.weight }; };
   export const openOverlay = spec => { host.overlays.push(spec); return "o" + host.overlays.length; };
   export const notify = n => host.notes.push(n);
-  export const closeOverlay = id => { (host.closed ??= []).push(id); }, commands = () => [], focused = () => host.focused ?? null, home = () => "/home/tester";
+  export const closeOverlay = id => { (host.closed ??= []).push(id); (host.events ??= []).push("close " + id); }, commands = () => [], focused = () => host.focused ?? null, home = () => "/home/tester";
   export const hc = async args => { host.hcs.push(args);
+    if (args[0] === "read" && host.readOut != null) return { code: 0, stdout: host.readOut };
     if (args[0] === "machine") return { code: 0, stdout: JSON.stringify({ machines: host.machines ?? [] }) };
     return args[0] === "read" ? { code: 0, stdout: "\\x1b[32mone\\x1b[0m\\ntwo   \\n\\n" } : { code: 0, stdout: "" }; };
   export const exec = async (command, args, opts) => { host.execs.push({ command, args, opts });
+    // A test's own answers first (host.execHook returns one, or nothing for the rest).
+    const hooked = host.execHook && host.execHook(command, args, opts);
+    if (hooked) return hooked;
     if (command === "herdr-app") return { code: 0, stdout: JSON.stringify({ space: "s0", tab: "tabNEW", terminal: "tNEW" }), stderr: "" };
     // hunk: the live sessions (host.hunkSessions), and whether a repo has saved notes.
     if (command === "hunk" && args[0] === "session") return { code: 0, stdout: JSON.stringify({ sessions: host.hunkSessions ?? [] }), stderr: "" };
@@ -209,8 +216,10 @@ const gitURL = await load("mods/ram/git.js");
 const { default: Ram, LEVELS, level, sideWidth, fitBlocks, RG_TAB } = await import(await load("mods/ram/main.js"));
 // Spawned tasks run at once; settle() lets their awaits finish. (Some never end,
 // like the command loop waiting on nextCommand, so they can't be awaited.)
+// A focus handle has the keyboard while host.keyboard is it (focus() gives it).
 const cx = { timer: { every: (ms, fn) => host.timers.push({ ms, fn }), after: () => {} }, notify() {},
-  spawn: fn => fn(cx), stop_propagation() { host.stopped = true; } };
+  spawn: fn => fn(cx), stop_propagation() { host.stopped = true; },
+  focus_handle() { const h = { focus() { host.keyboard = h; }, is_focused: () => host.keyboard === h, release: () => true }; return h; } };
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0)); };
 const flatten = tree => typeof tree === "object" && tree ? [tree, ...tree.kids.flatMap(flatten)] : [];
 const idOf = n => n?.ops?.find(([key]) => key === "id")?.[1];
@@ -255,23 +264,26 @@ const heightOf = n => {
 };
 
 // ---- Levels -------------------------------------------------------------------
-assert.deepEqual(LEVELS, { meta: { map: { px: 74 }, side: 390, peek: false, rams: true },
-  space: { map: { px: 74 }, side: 340, peek: false, rams: false }, hunk: { map: { px: 74 }, side: 280, peek: true, rams: false } });
+assert.deepEqual(LEVELS, { meta: { map: { px: 74 }, side: 390, rams: true }, space: { map: { px: 74 }, side: 340, rams: false } },
+  "two levels: meta (SP) and the space level (BP)");
 assert.equal(level(), "space");
 const map = view({});
-assert.deepEqual(host.timers.map(t => t.ms), [250, 250, 1000], "git, the side column's edge, hunk's sessions");
+assert.deepEqual(host.timers.map(t => t.ms), [250, 250, 1000, 2000, 1000],
+  "git, the side column's edge, the commands in HEAP and their last lines, hunk's sessions");
 map.size = { width: 1600, height: 58 };
 let tree = R(map, {});
 await settle();
 assert.deepEqual(layoutCalls(), [{ name: "layout.resize", args: { id: "ram-map", px: 74 } },
-  { name: "layout.resize", args: { id: "sidebar", px: 340 } }, { name: "layout.hide", args: { id: "ram-peek" } },
-  { name: "layout.hide", args: { id: "ram-rams" } }]);
+  { name: "layout.resize", args: { id: "sidebar", px: 340 } }, { name: "layout.hide", args: { id: "ram-rams" } },
+  { name: "layout.hide", args: { id: "ram-peek" } }], "no SP yet: nothing for the peek strip");
 host.calls = [];
 R(map, {});
 await settle();
 assert.equal(layoutCalls().length, 0, "sizes are set once per level");
-assert.deepEqual(host.shared.get("ram.from"), { s0: "tab0-0" }, "the shown tab is remembered");
-console.log("PASS: levels: space by default; the map copy sizes the layout once per level");
+assert.deepEqual([host.shared.get("ram.bp"), host.shared.get("ram.frame")], [{ s0: "tab0-0" }, "s0"],
+  "the space level's tab is its space's BP, and that space is the one you work in");
+assert.equal(host.shared.get("ram.sp"), undefined, "SP is meta's: it hasn't shown yet");
+console.log("PASS: levels: meta and space, space by default; the map copy sizes the layout once per level; the space level keeps each space's BP");
 
 // ---- The strip (space level): the current space's tabs ------------------------------
 assert.deepEqual(textOf(withId(tree, "ram-strip-space")), ["0x01", "api"], "the strip starts with the space it shows");
@@ -315,11 +327,36 @@ click(tree, "tabchip-tab0-1");
 assert.deepEqual(host.calls, [{ name: "tab.select", args: { id: "tab0-1" } }], "a tab chip shows that tab");
 withId(tree, "tabchip-tab0-1").handlers["on_mouse_down:left"]({ click_count: 2 }, cx);
 assert.deepEqual(host.calls.at(-1), { name: "tab.rename", args: { id: "tab0-1" } }, "a double-click renames it");
-// The levels, top right: ^b, then each button's key from keys.json.
+// The levels, top right: ^b, then each level's key (keys.json), its name and its
+// pointer's mark (meta SP▸ in amber, space BP▸ in white); then b (the side column)
+// and P (the peek strip), lit while they show.
 const levels = textOf(withId(tree, "ram-levels"));
-assert.deepEqual(levels, ["^b", "m", "meta", "i", "space", "r", "hunk"], levels);
+assert.deepEqual(levels, ["^b", "m", "meta", "SP\u25b8", "i", "space", "BP\u25b8", "b", "P"], levels);
 assert.deepEqual(op(withId(tree, "ram-level-space"), "border_color"), ["#ffb547"], "the current level is lit");
-assert.deepEqual(["meta", "space", "hunk"].map(l => op(withId(tree, `ram-level-${l}`), "w")[0]), [78 * 1.25, 78 * 1.25, 78 * 1.25], "three buttons, one size");
+assert.deepEqual(["meta", "space"].map(l => op(withId(tree, `ram-level-${l}`), "w")[0]), [100 * 1.25, 100 * 1.25], "two buttons, one size");
+assert(!withId(tree, "ram-level-hunk"), "no hunk level: HUNK is a bar in the space level's column");
+{
+  const markColor = (id, mark) => op(flatten(withId(tree, id)).find(n => n.kids.includes(mark)), "text_color")[0];
+  assert.deepEqual([markColor("ram-level-meta", "SP\u25b8"), markColor("ram-level-space", "BP\u25b8")], ["#ffb547", "#ffffff"], "SP amber, BP white");
+  for (const id of ["ram-sidebar", "ram-peek-toggle"]) {
+    assert.deepEqual(op(withId(tree, id), "size"), [26 * 1.25], `${id}: a square as tall as the buttons`);
+    assert.deepEqual(op(withId(tree, id), "border_color"), ["#ffb547"], `${id}: lit, it shows`);
+  }
+  assert.equal(op(withId(tree, "ram-sidebar"), "tooltip")[0], "Hide the side column  ^b b");
+  assert(op(withId(tree, "ram-peek-toggle"), "tooltip")[0].startsWith("Hide the peek strip") && op(withId(tree, "ram-peek-toggle"), "tooltip")[0].endsWith("  ^b P"));
+  host.calls = [];
+  click(tree, "ram-sidebar");
+  assert.deepEqual(host.calls, [{ name: "layout.toggle", args: { id: "sidebar" } }], "b: the side column, as ^b b");
+  host.layout = { id: "root", type: "row", children: [{ id: "sidebar", type: "block", hidden: true }] };
+  assert.notDeepEqual(op(withId(R(map, {}), "ram-sidebar"), "border_color"), ["#ffb547"], "hidden: not lit");
+  host.layout = null;
+  click(tree, "ram-peek-toggle");
+  assert.equal(host.shared.get("ram.peek"), false, "P: the peek strip off");
+  assert.notDeepEqual(op(withId(R(map, {}), "ram-peek-toggle"), "border_color"), ["#ffb547"], "off: not lit");
+  click(R(map, {}), "ram-peek-toggle");
+  assert.equal(host.shared.get("ram.peek"), true, "and on again");
+  host.shared.delete("ram.peek");
+}
 assert(!withId(tree, "ram-close"));
 host.platform = "linux"; host.buttons = true;
 assert(withId(R(map, {}), "ram-close"));
@@ -327,7 +364,7 @@ host.platform = "macos"; host.buttons = false;
 click(tree, "ram-level-meta");
 assert.equal(host.shared.get("ram.zoom"), "meta");
 assert.equal(level(), "meta");
-console.log("PASS: strip: the space's tabs as small fixed chips (*n shown, &n the rest, !n faults), click shows, double-click renames, a hover x closes; one square +; ^b level buttons");
+console.log("PASS: strip: the space's tabs as small fixed chips (*n shown, &n the rest, !n faults), click shows, double-click renames, a hover x closes; one square +; ^b, the two levels with SP\u25b8 and BP\u25b8, b and P");
 
 // ---- meta: the strip on top, the space sticks under the terminal --------------------------
 host.calls = [];
@@ -335,8 +372,9 @@ map.size = { width: 1600, height: 58 };
 tree = R(map, {});
 await settle();
 assert.deepEqual(layoutCalls(), [{ name: "layout.resize", args: { id: "ram-map", px: 74 } },
-  { name: "layout.resize", args: { id: "sidebar", px: 390 } }, { name: "layout.hide", args: { id: "ram-peek" } },
-  { name: "layout.show", args: { id: "ram-rams" } }]);
+  { name: "layout.resize", args: { id: "sidebar", px: 390 } }, { name: "layout.show", args: { id: "ram-rams" } }],
+  "(the peek strip stays hidden: meta has none)");
+assert.deepEqual(host.shared.get("ram.sp"), { space: "s0", tab: "tab0-0", pane: null }, "meta's first show: SP is the tab it shows");
 assert(withId(tree, "ram-strip") && withId(tree, "tabchip-tab0-0"), "the strip stays on top: the space's tabs");
 assert(!withId(tree, "ram-follow"), "follow isn't on the strip: its f is under the sticks' +");
 assert(!flatten(tree).some(n => /^region-/.test(idOf(n) ?? "")), "the space sticks aren't on the strip");
@@ -344,7 +382,7 @@ assert.deepEqual(op(withId(tree, "ram-level-meta"), "border_color"), ["#ffb547"]
 // The space sticks are a copy of their own (role rams), in the block under the terminal.
 let timersBefore = host.timers.length;
 const rams = view({ role: "rams" });
-assert.deepEqual(host.timers.slice(timersBefore).map(t => t.ms), [250, 10000], "its git and the exit history");
+assert.deepEqual(host.timers.slice(timersBefore).map(t => t.ms), [250, 10000, 2000], "its git, the exit history, its commands' last lines");
 rams.size = { width: 1400, height: 340 };
 const RR = () => R(rams, { role: "rams" });
 tree = RR();
@@ -355,13 +393,13 @@ assert(widths.reduce((n, w) => n + w, 0) <= 1400, `the sticks fit the block: ${w
 assert.equal(new Set(widths).size, 1, `every stick one width: ${widths}`);
 for (const id of ["frame-tab0-0", "frame-tab0-1", "alloc-t1", "alloc-t2", "alloc-child", "block-t1", "block-child", "ram-scan", "ram-new-space"])
   assert(withId(tree, id), id);
-// Right of the last stick: + (a new space) and under it follow's f, two squares of one size.
+// Right of the last stick: + (a new space), then follow's f and the e switch, squares of one size.
 assert.equal(idOf(withId(tree, "ram-regions").kids.at(-1)), "ram-stick-buttons", "after the last stick");
-assert.deepEqual(withId(tree, "ram-stick-buttons").kids.map(idOf), ["ram-new-space", "ram-follow"], "the f is under the +");
+assert.deepEqual(withId(tree, "ram-stick-buttons").kids.map(idOf), ["ram-new-space", "ram-follow", "ram-enter"], "f and e under the +");
 assert.equal(withId(tree, "ram-stick-buttons").kind, "v_flex", "one over the other");
-for (const id of ["ram-new-space", "ram-follow"])
+for (const id of ["ram-new-space", "ram-follow", "ram-enter"])
   assert.deepEqual([op(withId(tree, id), "w")[0], op(withId(tree, id), "h")[0]], [30 * 1.25, 30 * 1.25], `${id} is a square`);
-assert.deepEqual(textOf(withId(tree, "ram-follow")), ["f"], "just its key");
+assert.deepEqual([textOf(withId(tree, "ram-follow")), textOf(withId(tree, "ram-enter"))], [["f"], ["e"]], "just their keys");
 // *1 of api has five blocks (t1, its sub-agent, t5, t9 and a shell): the first two fit, +3 counts the rest.
 assert.deepEqual(textOf(withId(tree, "more-tab0-0")), ["+3"]);
 assert.equal(op(withId(tree, "more-tab0-0"), "tooltip")[0], "3 more: Claude, Claude, zsh");
@@ -380,7 +418,25 @@ tree = RR();
 assert(!withId(tree, "framex-tab0-1"), "the pointer leaves: gone");
 const text = textOf(tree);
 for (const want of ["STACK \u2193  2", "HEAP \u2191  5", "*1", "&2", "@remote", "FAULT 2"]) assert(text.includes(want), want);
-assert(text.includes("SP\u25b8"), "SP marks each stick's shown tab");
+// The pointers: one SP in all the sticks (the tab meta shows, api *1) and a BP on each
+// stick's work tab, white for the space you work in (api) and dim for the others. api's
+// *1 is both: S (amber) B (white) \u25b8.
+{
+  const ptr = id => textOf(withId(tree, `ptr-${id}`));
+  const colorOf = (id, mark) => op(flatten(withId(tree, `ptr-${id}`)).find(n => n.kids.includes(mark)), "text_color")[0];
+  assert.deepEqual(ptr("tab0-0"), ["S", "B", "\u25b8"], "api *1: SP and api's BP");
+  assert.deepEqual([colorOf("tab0-0", "S"), colorOf("tab0-0", "B"), colorOf("tab0-0", "\u25b8")], ["#ffb547", "#ffffff", "#ffb547"]);
+  for (const id of ["tab1-0", "tab2-0", "tab3-0"]) {
+    assert.deepEqual(ptr(id), ["BP\u25b8"], `${id}: its space's BP (the tab it shows, until you pick one)`);
+    assert.equal(colorOf(id, "BP\u25b8"), host.colors.dim, `${id}: dim, not the space you work in`);
+  }
+  for (const id of ["tab0-1", "tab1-1", "tab2-1", "tab3-1"]) assert.deepEqual(ptr(id), [], `${id}: no pointer`);
+  assert.equal(text.filter(x => x === "SP\u25b8" || x === "S").length, 1, "one SP");
+  assert(op(withId(tree, "ptr-tab0-0"), "tooltip")[0].startsWith("SP and BP: the tab meta shows"), "SP's mark says what it is");
+  assert(op(withId(tree, "ptr-tab0-0"), "tooltip")[0].endsWith("click: BP here (^b I)"), "and that a click moves the BP there");
+  assert.equal(op(withId(tree, "ptr-tab1-0"), "tooltip")[0], "BP: web's work tab");
+  assert(withId(tree, "ptr-tab0-0").ops.some(([k, prop]) => k === "loop" && prop === "opacity"), "SP's mark breathes");
+}
 // Each frame's arrow from &n to its blocks: a line, then the drawn head (mods/ram/arrow.svg),
 // centered together on the row so they meet. Before, a "\u203a" glyph placed by hand sat
 // off the line and looked wrong.
@@ -425,11 +481,11 @@ assert(flatten(tree).flatMap(n => n.ops).filter(([key]) => key === "text_size").
 // Clicks in meta only select: the level stays meta (the terminal above shows it).
 host.calls = [];
 click(tree, "head-s1");
-assert.deepEqual(host.calls, [{ name: "space.select", args: { id: "s1" } }]);
+assert.deepEqual(host.calls, [{ name: "tab.select", args: { id: "tab1-0" } }], "a stick's name shows its BP tab (SP goes there)");
 assert.equal(host.shared.get("ram.zoom"), "meta", "a stick's name selects that space, still in meta");
 host.calls = [];
 click(tree, "frame-tab3-1");
-assert.deepEqual(host.calls, [{ name: "space.select", args: { id: "s3" } }, { name: "tab.select", args: { id: "tab3-1" } }]);
+assert.deepEqual(host.calls, [{ name: "tab.select", args: { id: "tab3-1" } }], "one command: the tab (and so its space)");
 assert.equal(host.shared.get("ram.zoom"), "meta", "a frame selects that tab, still in meta");
 host.calls = [];
 click(tree, "alloc-t2");
@@ -450,13 +506,19 @@ rams.gitInfo.git[JSON.stringify([null, "/repo/web"])] = { name: "web", branch: "
 spaces[1].folder = "/repo/web";
 host.shared.set("ram.zoom", "meta");
 tree = RR();
-host.calls = []; host.execs = [];
+host.calls = []; host.execs = []; host.hcs = [];
 click(tree, "git-s1");
 await settle();
-assert.deepEqual(host.calls[0], { name: "space.select", args: { id: "s1" } });
-assert.deepEqual(host.execs.at(-1)?.args, ["do", "tab.new", "--space", "s1", "--name", "lazygit", "--folder", "/repo/web",
-  "--argv", '["exec","lazygit"]'], "a stick's git line opens lazygit in that space");
-assert.equal(host.shared.get("ram.zoom"), "space");
+assert.deepEqual(host.execs.at(-1)?.args, ["do", "tab.new", "--space", "s1", "--name", "lazygit web", "--folder", "/repo/web",
+  "--argv", '["exec","lazygit"]'], "a stick's git line opens lazygit in that space, for its repo, named after it");
+assert.deepEqual(host.hcs.at(-1), ["label", "tNEW", "ram.lazygit=/repo/web"], "labelled with its folder: one lazygit per repo");
+assert.equal(host.shared.get("ram.zoom"), "meta", "e is off: it shows in meta, at SP");
+host.shared.set("ram.enter", true); host.execs = [];
+click(RR(), "git-s1");
+await settle();
+assert.equal(host.execs.at(-1)?.args[5], "lazygit web");
+assert.equal(host.shared.get("ram.zoom"), "space", "e on: it takes you into the space level");
+host.shared.delete("ram.enter");
 assert(!flatten(tree).some(n => idOf(n) === "git-s3" && n.handlers.on_click), "no repo, no click");
 // The git line in symbols: web on main with a remote and nothing to do is just ✓.
 assert.deepEqual(textOf(withId(tree, "git-s1")), ["\u2713"]);
@@ -488,7 +550,7 @@ const r0 = flatten(withId(tree, "region-s0"));
 const heapLabelAt = r0.findIndex(n => n.kids.includes("HEAP \u2191  5")), gitAt = r0.findIndex(n => idOf(n) === "git-s0");
 assert(r0.slice(heapLabelAt + 1, gitAt).some(n => op(n, "h")?.[0] === 8 * 1.25), "a gap between HEAP's label and the git line");
 rams.size = { width: 1400, height: 340 };
-console.log("PASS: meta: the strip on top (tabs); under the terminal every space a stick of one width that fits its block (frames down with a hover x, heap up, +n more where it fits), clicks only select, git lines open lazygit");
+console.log("PASS: meta: the strip on top (tabs); under the terminal every space a stick of one width that fits its block (frames down with a hover x, heap up, +n more where it fits), one SP and a BP per stick, clicks only select, git lines open lazygit (in meta unless e is on)");
 
 // ---- Nothing in a stick goes past its edge, however narrow it gets ----------------------
 {
@@ -578,7 +640,7 @@ host.shared.set("ram.zoom", "space");
 timersBefore = host.timers.length;
 const side = view({ role: "side" });
 side.size = { width: 300, height: 700 };
-assert.deepEqual(host.timers.slice(timersBefore).map(t => t.ms), [250, 15000], "the side adds its git tick and a gentle machines check");
+assert.deepEqual(host.timers.slice(timersBefore).map(t => t.ms), [250, 15000, 2000], "the side adds its git tick, a gentle machines check and its commands' last lines");
 spaces[0].folder = "/repo/api";
 side.gitInfo.git[JSON.stringify([null, "/repo/api"])] = { name: "herdr", branch: "feat-x", ahead: 2, behind: 1, dirty: 5,
   upstream: true, top: "/repo/api", repo: JSON.stringify([null, "/repo/api/.git"]),
@@ -587,7 +649,7 @@ tree = R(side, { role: "side" });
 for (const id of ["stack-s0", "stack-s1", "stack-s2", "stack-s3", "ram-space-new", "heap-t1", "heap-t2", "heap-child", "ram-git", "ram-settings", "ram-keys", "ram-commands"])
   assert(withId(tree, id), id);
 const st = textOf(tree);
-for (const want of ["0x01", "api", "STACK \u2193  4", "HEAP \u2191  5", "\u25c2SP", "GIT", "herdr", "feat-x", "\u21912", "\u21931",
+for (const want of ["0x01", "api", "STACK \u2193  4", "HEAP \u2191  5", "\u25c2BP", "GIT", "herdr", "feat-x", "\u21912", "\u21931",
   "\u00b15", "src/app.ts", "notes.md", "+1 more", "Needs you", "Working", "^b s", "^b ?", "^b :"])
   assert(st.includes(want), want);
 // GIT's line says what the meta git line says, right after GIT: repo · branch (the
@@ -604,9 +666,11 @@ assert.notEqual(textOf(withId(R(side, { role: "side" }), "ram-git-line")).at(-1)
 side.size = { width: 300, height: 700 };
 assert(!st.some(x => /\bt\d+\b/.test(x)), "no terminal addresses");
 assert.deepEqual(textOf(withId(tree, "stack-s0")).slice(0, 2), ["0x01", "api"]);
-assert.equal(textOf(withId(tree, "stack-s0")).at(-1), "\u25c2SP", "SP points at the space you're in, from the right");
+assert.equal(textOf(withId(tree, "stack-s0")).at(-1), "\u25c2BP", "BP marks the space you work in, from the right");
+assert.equal(op(flatten(withId(tree, "stack-s0")).find(n => n.kids.includes("\u25c2BP")), "text_color")[0], "#ffffff", "in BP's white");
 assert.deepEqual(textOf(withId(tree, "stack-s1")).slice(0, 2), ["0x02", "web"]);
-assert.equal(textOf(withId(tree, "stack-s1")).at(-1), "", "the others keep the SP column empty, so names line up");
+assert.equal(textOf(withId(tree, "stack-s1")).at(-1), "", "the others keep the BP column empty, so names line up");
+assert(st.includes("^b w"), "STACK's row says its key (^b w, navigate) where it fits");
 assert.equal(motions(withId(tree, "ram-stack")).length, 0, "nothing blinks in the stack");
 assert(!flatten(withId(tree, "ram-stack")).some(n => idOf(n)?.startsWith?.("led") || (op(n, "size") && op(n, "rounded"))),
   "no status lights in the stack rows");
@@ -627,7 +691,7 @@ const sideHeap = flatten(withId(tree, "ram-heap")).map(idOf).filter(id => id?.st
 assert.deepEqual(sideHeap, ["heap-child", "heap-t9", "heap-t5", "heap-t2", "heap-t1"]);
 host.calls = [];
 click(tree, "stack-s3");
-assert.deepEqual(host.calls.at(-1), { name: "space.select", args: { id: "s3" } });
+assert.deepEqual(host.calls.at(-1), { name: "tab.select", args: { id: "tab3-0" } }, "a space in the stack shows it at its BP");
 assert.equal(host.shared.get("ram.zoom"), "space", "a space in the stack shows it, in the space level");
 withId(tree, "stack-s3").handlers["on_mouse_down:left"]({ click_count: 2 }, cx);
 assert.deepEqual(host.calls.at(-1), { name: "space.rename", args: { id: "s3" } }, "a double-click renames it");
@@ -643,21 +707,25 @@ assert.equal(host.overlays.at(-1).mod, "new-menu");
 tree = R(side, { role: "side" });
 click(tree, "ram-commands");
 assert.equal(host.calls.at(-1).name, "app.palette");
-// GIT opens lazygit in a new tab at the repo's top, labels it and names the tab.
+// GIT opens lazygit in a new tab at the repo's top, named after it and labelled with it.
 click(tree, "ram-git");
 await settle();
-assert.deepEqual(host.execs.at(-1), { command: "herdr-app", args: ["do", "tab.new", "--space", "s0", "--name", "lazygit",
+assert.deepEqual(host.execs.at(-1), { command: "herdr-app", args: ["do", "tab.new", "--space", "s0", "--name", "lazygit api",
   "--folder", "/repo/api", "--argv", '["exec","lazygit"]'], opts: undefined });
-assert.deepEqual(host.hcs.at(-1), ["label", "tNEW", "ram.lazygit=1"]);
+assert.deepEqual(host.hcs.at(-1), ["label", "tNEW", "ram.lazygit=/repo/api"]);
 assert.equal(host.shared.get("ram.opening"), null);
-// The hunk button, with no review open yet, opens the menu of what to review.
+// HUNK, under GIT (the space has a repo): no review yet, so its + and its header open
+// the menu of what to review.
 map.gitInfo.git[JSON.stringify([null, "/repo/api"])] = side.gitInfo.git[JSON.stringify([null, "/repo/api"])];
 host.shared.set("ram.zoom", "space");
-const strip2 = R(map, {});
+assert.deepEqual(textOf(withId(tree, "ram-hunk-head")), ["HUNK", "no reviews", "^b r", "+"], "HUNK, no reviews, its key, +");
 host.overlays = [];
-click(strip2, "ram-level-hunk");
+click(tree, "ram-hunk-new");
 assert.deepEqual(host.overlays.at(-1), { mod: "ram", kind: "dialog", width: 470, height: 290,
   props: { role: "hunk-menu", space: "s0", name: "api", repo: "herdr" } });
+host.overlays = [];
+click(tree, "ram-hunk-head");
+assert.equal(host.overlays.at(-1)?.props?.role, "hunk-menu", "no review yet: the header (^b r) opens the menu too");
 assert.equal(host.notes.length, 0);
 // MACHINES, above the keys: state dots, + for a space there, + to add one.
 host.machines = [{ name: "remote", state: "connected" }, { name: "pc", state: "unreachable", why: "cannot reach pc" },
@@ -681,7 +749,7 @@ host.calls = []; host.shared.set("ram.zoom", "meta");
 tree = R(side2, { role: "side" });
 assert(withId(tree, "ram-all") && withId(tree, "ram-machine-remote") && withId(tree, "ram-machine-pc"), "meta: the main stick, then .rodata");
 click(tree, "ram-machine-remote");
-assert.deepEqual(host.calls.at(-1), { name: "space.select", args: { id: "s2" } }, "a connected machine selects its space");
+assert.deepEqual(host.calls.at(-1), { name: "tab.select", args: { id: "tab2-0" } }, "a connected machine selects its space (at its BP)");
 assert.equal(host.shared.get("ram.zoom"), "meta", "without leaving meta");
 click(tree, "ram-machine-new-remote");
 assert.deepEqual(host.calls.at(-1), { name: "space.new", args: { machine: "remote" } });
@@ -702,7 +770,7 @@ assert(headerRow.kids.some(k => idOf(k) === "ram-machine-none") && headerRow.kid
 // A short column (a small window) fits: its parts add up to no more than its
 // height, so the keys at the bottom always show. Rows give way first (their labels
 // count them), then GIT's file names; past that, .rodata and GIT scroll. Here in the
-// space level; the hunk level's (HUNK on top, compact rows) is checked with hunk.
+// space level.
 host.shared.set("ram.zoom", "space");
 const short = view({ role: "side" });
 await settle();
@@ -722,7 +790,7 @@ for (const [machines, height] of [[[], 270], [[], 330], [[{ name: "remote", stat
 let r = fits([], 270);
 assert(!withId(r.tree, "stack-s1") && !withId(r.tree, "heap-t1") && !r.text.includes("src/app.ts") && r.text.includes("+5 more"),
   "at 270 px: the current space, GIT's counts, no file names");
-r = fits([], 345);
+r = fits([], 345 + 37.25);  // (HUNK, under GIT, takes 37.25 px)
 assert(["src/app.ts", "notes.md", "old.txt", "new.rs"].every(x => r.text.includes(x)) && !r.text.includes("x.js") && r.text.includes("+1 more"),
   "with room, four file names (and +1 more)");
 r = fits([], 900);
@@ -736,8 +804,9 @@ assert(op(memory, "flex_1") && op(memory, "overflow_hidden") && op(memory, "min_
 assert(op(details, "overflow_y_scrollbar") && 2 + heightOf(memory) + op(details, "h")[0] + heightOf(keysRowNode) === 270,
   ".rodata and GIT get what's left and scroll");
 assert(op(keysRowNode, "flex_none"), "the keys always show");
-// When everything fits, nothing scrolls and nothing has a set height.
-r = fits([], 270);
+// When everything fits, nothing scrolls and nothing has a set height (HUNK, under GIT,
+// takes 37.25 px more than the 270 px this needed before).
+r = fits([], 270 + 37.25);
 assert(!op(withId(r.tree, "ram-side-details"), "h") && !op(withId(r.tree, "ram-side-details"), "overflow_y_scrollbar"));
 // Every height from 200 to 420 px, with and without a repo and a machine: the
 // column never needs more than it has, and when spaces are hidden and there's
@@ -751,8 +820,7 @@ const sweep = lvl => {
         const r2 = fits(machines, height);
         const d = withId(r2.tree, "ram-side-details"), scrolls = Boolean(op(d, "overflow_y_scrollbar"));
         const keysNode = flatten(r2.tree).find(n => n.kids.some(k => idOf(k) === "ram-settings"));
-        const need = scrolls ? 2 + heightOf(withId(r2.tree, "ram-hunk")) + heightOf(withId(r2.tree, "ram-side-memory")) + op(d, "h")[0] + heightOf(keysNode)
-          : r2.total;
+        const need = scrolls ? 2 + heightOf(withId(r2.tree, "ram-side-memory")) + op(d, "h")[0] + heightOf(keysNode) : r2.total;
         const where = `${lvl}: ${folder}, ${machines.length} machine(s), ${height} px`;
         assert(need <= height + 1e-9, `${where} needs ${need}`);
         assert(withId(r2.tree, "stack-s0") && withId(r2.tree, "ram-settings"), where);
@@ -876,7 +944,7 @@ console.log("PASS: drag to reorder: tabs on the strip and the sticks' frames (ta
   };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const sideCall = () => layoutCalls().find(c => c.args.id === "sidebar");
-  assert.deepEqual(["meta", "space", "hunk"].map(sideWidth), [390, 340, 280], "each level's own width, until you drag it");
+  assert.deepEqual(["meta", "space"].map(sideWidth), [390, 340], "each level's own width, until you drag it");
   host.shared.set("ram.side", { meta: 239, space: "wide" });
   assert.deepEqual(["meta", "space"].map(sideWidth), [390, 340], "a kept width under the side column's min (or not a number) is ignored");
   host.shared.delete("ram.side");
@@ -1042,7 +1110,7 @@ assert(withId(at2, "all-file-s0:notes.md"));
 }
 host.calls = [];
 click(at2, "all-space-s1");
-assert.deepEqual(host.calls, [{ name: "space.select", args: { id: "s1" } }]);
+assert.deepEqual(host.calls, [{ name: "tab.select", args: { id: "tab1-0" } }], "at its BP tab (SP goes there)");
 assert.equal(host.shared.get("ram.zoom"), "meta", "a space in the tree selects it, still in meta");
 click(at2, "all-fold-s0");
 at2 = AS();
@@ -1228,28 +1296,48 @@ console.log("PASS: main stick (0x00 @): meta's side column over .rodata and the 
 assert.equal(keysFile[`mod:${BAR}`].g, `${BAR}.lazygit`, "^b g is bound in every layout (the key bar sends RAM's to ram.git)");
 const cmdMap = view({});
 await settle();
-const send = async c => { host.waiting.at(-1)(c); await settle(); };
+// The strip copy's command loop: each command it takes, it waits for the next one
+// (other copies wait on theirs too, so this one's is kept by hand).
+let cmdNext = host.waiting.at(-1);
+const send = async c => { const w = cmdNext, before = host.waiting.length; w(c); await settle(); cmdNext = host.waiting.slice(before).at(-1); };
 cmdMap.gitInfo.git[JSON.stringify([null, "/repo/api"])] = side.gitInfo.git[JSON.stringify([null, "/repo/api"])];
-host.execs = []; host.notes = []; host.calls = [];
+host.execs = []; host.notes = []; host.calls = []; host.hcs = [];
 await send("git");
-assert.deepEqual(host.execs.at(-1)?.args, ["do", "tab.new", "--space", "s0", "--name", "lazygit", "--folder", "/repo/api",
-  "--argv", '["exec","lazygit"]'], "^b g opens lazygit at the space's repo, as clicking GIT does");
+assert.deepEqual(host.execs.at(-1)?.args, ["do", "tab.new", "--space", "s0", "--name", "lazygit api", "--folder", "/repo/api",
+  "--argv", '["exec","lazygit"]'], "^b g opens lazygit at the repo of the space you work in, as clicking GIT does");
 assert.equal(host.notes.length, 0);
-// Not a repo: a toast says so; nothing opens, the level stays.
-spaces[0].folder = "";
-host.execs = []; host.shared.set("ram.zoom", "meta");
+// Not a repo: GIT's dialog (role git-init) asks what lazygit would ask there, and
+// nothing opens yet.
+spaces[0].folder = "/home/tester/notes";
+for (const copy of [cmdMap, side]) copy.gitInfo.git[JSON.stringify([null, "/home/tester/notes"])] = null;
+host.execs = []; host.hcs = []; host.overlays = []; host.shared.set("ram.zoom", "meta");
 await send("git");
-assert.equal(host.execs.length, 0, "no repo: nothing opens");
-assert.deepEqual([host.notes.at(-1)?.title, host.notes.at(-1)?.body], ["Not a git repo", "api isn't in a git repository, so lazygit has nothing to open."]);
+assert.equal(host.execs.filter(e => e.command === "herdr-app").length, 0, "nothing opens yet");
+assert.deepEqual(host.overlays.at(-1), { mod: "ram", kind: "dialog", width: 520, height: 340,
+  props: { role: "git-init", space: "s0", name: "api", folder: "/home/tester/notes", machine: null } }, "the dialog, for that folder");
+assert.equal(host.notes.length, 0, "no toast for that");
 assert.equal(host.shared.get("ram.zoom"), "meta", "and the level stays");
 host.shared.set("ram.zoom", "space");
 let gt = R(side, { role: "side" });
-assert.deepEqual(textOf(withId(gt, "ram-git-line")), ["GIT", "not a repo", "^b g"], "GIT's line says it too");
+assert.deepEqual(textOf(withId(gt, "ram-git-line")), ["GIT", "not a repo", "^b g"], "GIT's line says it's not a repo");
+host.overlays = [];
+click(gt, "ram-git"); await settle();
+assert.equal(host.overlays.at(-1)?.props?.role, "git-init", "and clicking it asks too");
+// A lazygit tab open there already (lazygit ran there before): it shows instead.
+spaces[0].tabs.push({ id: "tabLGN", name: "lazygit notes", named: true, index: 3, active: false, settled: false, status: null });
+panes.push({ pane: "pLGN", terminal: "tLGN", tab: "tabLGN", title: "lazygit", status: null, focused: false, cwd: "/home/tester/notes", program: { name: "lazygit" } });
+raw.push({ address: "tLGN", state: "live", created_ms: 9990, labels: { "ram.lazygit": "/home/tester/notes" } });
+host.overlays = []; host.calls = [];
+await send("git");
+assert.deepEqual([host.overlays.length, host.calls.at(-1)], [0, { name: "tab.select", args: { id: "tabLGN" } }], "its tab shows, no dialog");
+spaces[0].tabs.pop(); panes.pop(); raw.pop();
 host.notes = [];
-click(gt, "ram-git");
-assert.equal(host.notes.at(-1)?.title, "Not a git repo", "and so does clicking it");
 await send("hunk");
-assert.match(host.notes.at(-1)?.body ?? "", /hunk has nothing to open/, "^b r without a repo says so");
+assert.match(host.notes.at(-1)?.body ?? "", /hunk has nothing to open/, "^b r without a repo says so (hunk needs one)");
+// No folder at all: nowhere to open it.
+spaces[0].folder = ""; host.execs = []; host.notes = [];
+await send("git");
+assert.deepEqual([host.execs.length, host.notes.at(-1)?.title, host.notes.at(-1)?.body], [0, "Nowhere for lazygit", "api has no folder yet."]);
 spaces[0].folder = "/repo/unchecked";
 await send("git");
 assert.equal(host.notes.at(-1)?.title, "Checking git", "not looked at yet: try again in a moment");
@@ -1259,8 +1347,8 @@ spaces[0].folder = "/repo/api";
 assert.equal(keysFile[`mod:${BAR}`]["/"], `${BAR}.rg`, "^b / is bound in every layout (the key bar sends RAM's to ram.rg)");
 {
   const rgArgv = JSON.stringify(["exec", "sh", "-c", RG_TAB]);
-  const rgOpen = (space, folder) => ({ command: "herdr-app", args: ["do", "tab.new", "--space", space, "--name", "rg-fzf",
-    "--folder", folder, "--argv", rgArgv], opts: undefined });
+  const rgOpen = (space, folder) => ({ command: "herdr-app", args: ["do", "tab.new", "--space", space,
+    "--name", `rg-fzf ${folder.split("/").pop()}`, "--folder", folder, "--argv", rgArgv], opts: undefined });
   host.shared.set("ram.zoom", "space");
   side.gitInfo.git[JSON.stringify([null, "/repo/api"])] ??= cmdMap.gitInfo.git[JSON.stringify([null, "/repo/api"])];
   let st = R(side, { role: "side" });
@@ -1269,20 +1357,26 @@ assert.equal(keysFile[`mod:${BAR}`]["/"], `${BAR}.rg`, "^b / is bound in every l
   assert.deepEqual(textOf(rgb), ["/", "rg-fzf"], "its key, then rg-fzf, as meta's d diff");
   assert.equal(op(rgb, "tooltip")[0], "rg-fzf: search api  ^b /");
   const row = flatten(st).find(n => n.kids.includes(rgb));
-  assert.deepEqual(row.kids.slice(1).map(idOf), ["ram-rg", "ram-space-new"], "STACK's row: rg-fzf, then +");
+  assert.deepEqual(row.kids.slice(1).map(idOf), [undefined, "ram-rg", "ram-space-new"], "STACK's row: ^b w, rg-fzf, then +");
+  assert.deepEqual(textOf(row.kids[1]), ["^b w"]);
   assert(!op(rgb, "bg"), "not lit: no rg-fzf tab shows");
-  // A click opens it at the space's repo top. Its script labels the tab, so RAM doesn't.
+  // A click opens it at the space's repo top, named after it. Its script labels the tab
+  // with its folder, so RAM doesn't.
   host.execs = []; host.hcs = []; host.notes = [];
   click(st, "ram-rg"); await settle();
   assert.deepEqual(host.execs.at(-1), rgOpen("s0", "/repo/api"));
   assert.deepEqual(host.hcs, [], "no hc label from RAM");
   assert.deepEqual([host.shared.get("ram.zoom"), host.shared.get("ram.opening")], ["space", null]);
-  // ram.rg (^b / in RAM) does the same, from any level.
+  // ram.rg (^b / in RAM) does the same. From meta it stays in meta, unless e is on.
   host.execs = []; host.shared.set("ram.zoom", "meta");
   await send("rg");
   assert.deepEqual(host.execs.at(-1), rgOpen("s0", "/repo/api"), "^b / opens it as the button does");
-  assert.equal(host.shared.get("ram.zoom"), "space", "and shows the space level");
-  // Not a repo: the folder of the tab you're in (rg-fzf needs no git); nothing at all: a toast.
+  assert.equal(host.shared.get("ram.zoom"), "meta", "e off: in meta, where you are");
+  host.shared.set("ram.enter", true); host.execs = [];
+  await send("rg");
+  assert.equal(host.shared.get("ram.zoom"), "space", "e on: into the space level");
+  host.shared.delete("ram.enter");
+  // Not a repo: the folder (rg-fzf needs no git); nothing at all: a toast.
   spaces[0].folder = "/home/tester/notes"; side.gitInfo.git[JSON.stringify([null, "/home/tester/notes"])] = null;
   host.execs = [];
   click(R(side, { role: "side" }), "ram-rg"); await settle();
@@ -1292,65 +1386,86 @@ assert.equal(keysFile[`mod:${BAR}`]["/"], `${BAR}.rg`, "^b / is bound in every l
   click(R(side, { role: "side" }), "ram-rg"); await settle();
   assert.deepEqual([host.execs.length, host.notes.at(-1)?.title], [0, "Nowhere for rg-fzf"]);
   spaces[0].folder = "/repo/api"; host.notes = [];
-  // While rg-fzf runs (its terminal labelled ram.rg) its tab is a tool's: the button and
-  // its strip chip light up, the button shows it again, and it isn't the space's work tab.
-  spaces[0].tabs.push({ id: "tabRG", name: "rg-fzf", named: true, index: 3, active: false, settled: false, status: null });
+  // While rg-fzf runs (its terminal labelled ram.rg=<its folder>) its tab is a tool's: the
+  // button and its strip chip light up, the button shows it again, and it isn't a BP.
+  spaces[0].tabs.push({ id: "tabRG", name: "rg-fzf api", named: true, index: 3, active: false, settled: false, status: null });
   panes.push({ pane: "pRG", terminal: "tRG", tab: "tabRG", title: "rg-fzf", status: null, focused: true, program: { name: "fzf" } });
-  raw.push({ address: "tRG", state: "live", created_ms: 9600, labels: { "ram.rg": "1" } });
+  raw.push({ address: "tRG", state: "live", created_ms: 9600, labels: { "ram.rg": "/repo/api" } });
   spaces[0].tabs.forEach(t => t.active = t.id === "tabRG");
   R(map, {}); await settle();
   st = R(side, { role: "side" });
   assert.deepEqual(op(withId(st, "ram-rg"), "border_color"), ["#ffb547"], "lit while its tab shows");
   assert.equal(op(withId(st, "ram-rg"), "tooltip")[0], "rg-fzf is open: Esc closes its tab");
   const chip = withId(R(map, {}), "tabchip-tabRG");
-  assert(flatten(chip).some(n => n.kids.includes("rg-fzf") && op(n, "text_color")?.[0] === "#6fe3d3"), "its chip: rg-fzf, in cyan");
-  assert.equal(host.shared.get("ram.from").s0, "tab0-0", "not remembered as the work tab");
+  assert(flatten(chip).some(n => n.kids.includes("rg-fzf api") && op(n, "text_color")?.[0] === "#6fe3d3"), "its chip: its name, in cyan");
+  assert.equal(host.shared.get("ram.bp").s0, "tab0-0", "not a BP: api's stays its work tab");
+  assert.deepEqual(host.shared.get("ram.came"), { level: "space", space: "s0", tab: "tab0-0", pane: null }, "where you came from is kept");
   host.execs = []; host.calls = [];
   click(st, "ram-rg"); await settle();
-  assert.deepEqual([host.execs.length, host.calls.at(-1)], [0, { name: "tab.select", args: { id: "tabRG" } }], "one open: show it");
-  // Esc in rg-fzf ends the tab: RAM shows the tab you came from.
+  assert.deepEqual([host.execs.length, host.calls.at(-1)], [0, { name: "tab.select", args: { id: "tabRG" } }], "one open for this repo: show it");
+  // From meta: e off, it shows there; e on, the space level shows it (the level change
+  // shows ram.goto's place instead of the BP).
+  host.shared.set("ram.zoom", "meta");
+  R(map, {}); await settle();
+  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");  // (meta shows SP: api *1)
+  R(map, {}); await settle();
+  host.calls = [];
+  await send("rg");
+  assert.deepEqual([host.calls, host.shared.get("ram.zoom")], [[{ name: "tab.select", args: { id: "tabRG" } }], "meta"], "e off: in meta");
+  host.shared.set("ram.enter", true); host.calls = [];
+  await send("rg");
+  assert.deepEqual([host.calls, host.shared.get("ram.zoom")], [[], "space"], "e on: into the space level");
+  R(map, {}); await settle();
+  assert.deepEqual(host.calls.filter(c => c.name === "tab.select" || c.name === "pane.focus"), [{ name: "tab.select", args: { id: "tabRG" } }],
+    "which shows rg-fzf, not the BP");
+  host.shared.delete("ram.enter");
+  spaces[0].tabs.forEach(t => t.active = t.id === "tabRG");
+  R(map, {}); await settle();
+  host.shared.set("ram.came", { level: "space", space: "s0", tab: "tab0-0", pane: null });
+  // One per folder: rg-fzf for another repo is another tab.
+  raw.at(-1).labels = { "ram.rg": "/repo/other" };
+  click(R(side, { role: "side" }), "ram-rg"); await settle();
+  assert.deepEqual(host.execs.at(-1), rgOpen("s0", "/repo/api"), "the open one is for another repo: a new one for this");
+  raw.at(-1).labels = { "ram.rg": "/repo/api" };
+  // Esc in rg-fzf ends the tab: RAM shows the tab you came from (Herdr picked another).
   spaces[0].tabs.pop(); panes.pop();
   spaces[0].tabs.forEach(t => t.active = t.id === "tab0-1");
   host.calls = [];
   R(map, {}); await settle();
-  assert(host.calls.some(c => c.name === "tab.select" && c.args.id === "tab0-0"), "Esc: back to the tab before rg-fzf");
+  assert.deepEqual(host.calls.filter(c => c.name === "tab.select" || c.name === "pane.focus"), [{ name: "tab.select", args: { id: "tab0-0" } }],
+    "Esc: back to the tab before rg-fzf");
+  assert.equal(host.shared.get("ram.came"), null, "and that's used up");
+  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");  // (as the window would, after that tab.select)
+  R(map, {}); await settle();
   // What you pick stays printed and the tab turns into a shell like any other (the label
-  // goes): no longer a tool's, so it can be the work tab, and the button isn't lit.
-  spaces[0].tabs.push({ id: "tabRG", name: "rg-fzf", named: true, index: 3, active: true, settled: false, status: null });
+  // goes): no longer a tool's, so it can be a BP, and the button isn't lit.
+  spaces[0].tabs.push({ id: "tabRG", name: "rg-fzf api", named: true, index: 3, active: true, settled: false, status: null });
   panes.push({ pane: "pRG", terminal: "tRG", tab: "tabRG", title: "zsh", status: null, focused: true, program: { name: "zsh" } });
   raw.at(-1).labels = {};
   spaces[0].tabs.forEach(t => t.active = t.id === "tabRG");
   R(map, {}); await settle();
   assert(!op(withId(R(side, { role: "side" }), "ram-rg"), "bg"), "a plain tab now");
-  assert.equal(host.shared.get("ram.from").s0, "tabRG", "the work tab");
+  assert.equal(host.shared.get("ram.bp").s0, "tabRG", "api's BP");
   spaces[0].tabs.pop(); panes.pop(); raw.pop();
   spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");
-  host.shared.set("ram.from", { s0: "tab0-0" });
   R(map, {}); await settle();
-  // Only the space level has the button (hunk's column is the reviews'; meta's the main stick).
+  assert.equal(host.shared.get("ram.bp").s0, "tab0-0");
+  // Only the space level has the button (meta's column is the main stick).
   host.shared.set("ram.zoom", "meta");
   assert(!withId(R(side, { role: "side" }), "ram-rg"), "not in meta");
   host.shared.set("ram.zoom", "space");
-  spaces[0].tabs.push({ id: "tabHK", name: "hunk diff", named: true, index: 3, active: false, settled: false, status: null });
-  panes.push({ pane: "pHK", terminal: "tHK", tab: "tabHK", title: "hunk", status: null, focused: true, program: { name: "hunk" } });
-  raw.push({ address: "tHK", state: "live", created_ms: 9700, labels: { "ram.hunk": "diff" } });
-  spaces[0].tabs.forEach(t => t.active = t.id === "tabHK");
-  assert.equal(level(), "hunk");
-  st = R(side, { role: "side" });
-  assert(withId(st, "ram-space-new") && !withId(st, "ram-rg"), "not in the hunk level's STACK row");
-  spaces[0].tabs.pop(); panes.pop(); raw.pop();
-  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");
-  // The script: it labels its tab while rg-fzf runs and unlabels it after; Esc (nothing
-  // printed, exit 0) ends the tab; else what was picked is printed and a shell starts.
+  // The script: it labels its tab with its folder while rg-fzf runs and unlabels it
+  // after; Esc (nothing printed, exit 0) ends the tab; else what was picked is printed
+  // and a shell starts.
   assert.deepEqual(RG_TAB.split("\n"), [
-    '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" ram.rg=1 >/dev/null 2>&1',
+    '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" "ram.rg=$PWD" >/dev/null 2>&1',
     'out=$(rg-fzf); st=$?',
     '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" ram.rg= >/dev/null 2>&1',
     '[ -z "$out" ] && [ "$st" -eq 0 ] && exit 0',
     '[ -n "$out" ] && printf "%s\\n" "$out"',
     'exec "${SHELL:-/bin/sh}" -il']);
 }
-console.log("PASS: ^b / and the space level's rg-fzf button: rg-fzf in a tab at the repo (else the folder), lit while it runs; Esc closes it and you're back; a pick stays printed in a plain shell tab");
+console.log("PASS: ^b / and the space level's rg-fzf button: rg-fzf in a tab at the repo (else the folder), one per folder, lit while it runs, in meta unless e is on; Esc closes it and you're back; a pick stays printed in a plain shell tab");
 
 // ---- LANG: the space's repo by language, under GIT (space level) ---------------------------
 {
@@ -1433,8 +1548,8 @@ console.log("PASS: ^b / and the space level's rg-fzf button: rg-fzf in a tab at 
   panes.push({ pane: "pHK2", terminal: "tHK2", tab: "tabHK2", title: "hunk", status: null, focused: true, program: { name: "hunk" } });
   raw.push({ address: "tHK2", state: "live", created_ms: 9800, labels: { "ram.hunk": "diff" } });
   spaces[0].tabs.forEach(t => t.active = t.id === "tabHK2");
-  assert.equal(level(), "hunk");
-  assert(withId(R(lside, { role: "side" }), "ram-git") && !withId(R(lside, { role: "side" }), "ram-lang"), "not in the hunk level");
+  assert.equal(level(), "space", "a review shows in the space level (there's no hunk level)");
+  assert(withId(R(lside, { role: "side" }), "ram-git") && withId(R(lside, { role: "side" }), "ram-lang"), "GIT and LANG stay");
   spaces[0].tabs.pop(); panes.pop(); raw.pop();
   spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");
   spaces[0].folder = "/home/tester/notes"; lside.gitInfo.git[JSON.stringify([null, "/home/tester/notes"])] = null;
@@ -1475,36 +1590,199 @@ console.log("PASS: ^b / and the space level's rg-fzf button: rg-fzf in a tab at 
   host.shared.delete("ram.lang.include"); host.lsTree = null; host.props = {};
 }
 console.log("PASS: LANG (space level, under GIT): the repo's committed files by language, GitHub's way (bytes, programming and markup; vendored out); a bar, the top three and +n more; a language's files open in $EDITOR; ext picks what else counts");
-// The space's repo: the shown tab's folder (its focused terminal first), else another tab's.
+// The space's repo is the one it's named after: its first terminal's folder's (the
+// first tab with a terminal in a folder), and only that one. Another tab in another
+// repo doesn't stand in for it, even while that tab shows.
 const { Git } = await import(gitURL);
 const gi = new Git(), K = d => JSON.stringify([null, d]);
-const homeSpace = { id: "x", name: "~", machine: null, folder: "/home/tester", tabs: [{ id: "a", active: true }, { id: "b", active: false }] };
-const homePanes = [{ tab: "a", cwd: "/home/tester", focused: true }, { tab: "b", cwd: "/repo/other", focused: false }];
+const homeSpace = { id: "x", name: "~", machine: null, folder: "/home/tester", tabs: [{ id: "a", active: false }, { id: "b", active: true }] };
+const homePanes = [{ tab: "a", cwd: "/home/tester", focused: false }, { tab: "b", cwd: "/repo/other", focused: true }];
 const other = { name: "other", branch: "mainline", ahead: 1, behind: 0, dirty: 1, upstream: false, top: "/repo/other",
   repo: JSON.stringify([null, "/repo/other/.git"]), files: [] };
 assert.equal(gi.info(homeSpace, homePanes), undefined, "nothing looked at yet");
-gi.git[K("/home/tester")] = null;
-assert.equal(gi.info(homeSpace, homePanes), undefined, "the other tab's folder isn't looked at yet");
 gi.git[K("/repo/other")] = other;
-assert.equal(gi.info(homeSpace, homePanes)?.name, "other", "the shown tab's folder isn't a repo: another tab's is the space's");
-const sum = gi.summary(homeSpace, homePanes);
+assert.equal(gi.info(homeSpace, homePanes), undefined, "its first terminal's folder isn't looked at yet: the other tab's repo doesn't count");
+gi.git[K("/home/tester")] = null;
+assert.equal(gi.info(homeSpace, homePanes), null, "~ isn't a repo: the space has none, though the tab that shows is in one");
+assert.deepEqual([gi.summary(homeSpace, homePanes).repo, gi.summary(homeSpace, homePanes).tip], [null, "Not a git repo"]);
+assert.deepEqual(gi.folders(homeSpace, homePanes), ["/home/tester", "/repo/other"], "its folders: its first terminal's first");
+const { place } = await import(gitURL);
+assert.equal(place(homeSpace, homePanes), "/home/tester");
+assert.equal(place({ ...homeSpace, tabs: [] }, homePanes), "/home/tester", "no terminal in a folder: where it was made");
+// The first tab's terminal in the repo: that repo is the space's.
+const repoSpace = { ...homeSpace, tabs: [homeSpace.tabs[1], homeSpace.tabs[0]] };
+assert.equal(gi.info(repoSpace, homePanes)?.name, "other");
+const sum = gi.summary(repoSpace, homePanes);
 assert.equal(sum.head.text, "other \u00b7 mainline");
 assert.deepEqual(sum.marks.map(m => m.short), ["\u21911", "\u00b11", "\u2302"], "↑ to push, ± uncommitted, ⌂ no remote");
 assert.equal(sum.tip, "other \u00b7 mainline: 1 commit to push, 1 uncommitted file, no remote", "the same in words, one line");
-// Two repos without a remote: ⌂2; behind: ↓; nothing at all: ✓.
+// A third repo in another tab adds nothing to its marks (the main stick lists it).
 gi.git[K("/repo/third")] = { ...other, name: "third", top: "/repo/third", ahead: 0, behind: 2, dirty: 0, repo: JSON.stringify([null, "/repo/third/.git"]) };
-const both = [...homePanes, { tab: "b", cwd: "/repo/third", focused: false }];
-assert.deepEqual(gi.summary(homeSpace, both).marks.map(m => m.short), ["\u21911", "\u21932", "\u00b11", "\u23022"]);
+const both = [...homePanes, { tab: "a", cwd: "/repo/third", focused: false }];
+assert.deepEqual(gi.summary(repoSpace, both).marks.map(m => m.short), ["\u21911", "\u00b11", "\u2302"], "only the space's own repo");
+assert.deepEqual(gi.repos(repoSpace, both).map(r => r.name), ["other", "third"], "every repo, its own first, for the main stick");
 const cleanRepo = { ...other, ahead: 0, behind: 0, dirty: 0, upstream: true, files: [] };
 gi.git[K("/repo/other")] = cleanRepo;
-assert.deepEqual(gi.summary(homeSpace, homePanes).marks.map(m => [m.short, m.text]), [["\u2713", "clean"]]);
-assert.equal(new Git().summary(homeSpace, homePanes).tip, "Checking git\u2026");
+assert.deepEqual(gi.summary(repoSpace, homePanes).marks.map(m => [m.short, m.text]), [["\u2713", "clean"]]);
+assert.equal(new Git().summary(repoSpace, homePanes).tip, "Checking git\u2026");
 gi.git[K("/repo/other")] = other;
 gi.git[K("/home/tester")] = { ...other, name: "dots", top: "/home/tester", repo: JSON.stringify([null, "/home/tester/.git"]) };
-assert.equal(gi.info(homeSpace, homePanes)?.name, "dots", "the shown tab's repo comes first");
-console.log("PASS: ^b g opens lazygit like GIT's click; without a repo GIT says \"not a repo\" and a toast says why; the space's repo is the shown tab's, else another tab's");
+assert.equal(gi.info(homeSpace, homePanes)?.name, "dots", "~ as a repo: the space's");
+console.log("PASS: ^b g opens lazygit like GIT's click, at the repo (a folder that isn't one: GIT's dialog); the space's repo is its first terminal's, and only that one");
 
-// ---- Follow (meta) ------------------------------------------------------------------
+// ---- GIT's dialog: a folder that isn't in a repo (role git-init) ------------------------------
+{
+  const gi2 = await import(await load("mods/ram/gitinit.js"));
+  // lazygit's state.yml: its recent repos, in its order (quoted or not), up to the next key.
+  assert.deepEqual(gi2.recentRepos("lastupdatecheck: 0\nrecentrepos:\n    - /a\n    - '/b c'\n    - \"/d\"\nstartuppopupversion: 5\n    - /e\n"),
+    ["/a", "/b c", "/d"]);
+  assert.deepEqual([gi2.recentRepos("recentrepos: []\n"), gi2.recentRepos(""), gi2.recentRepos(undefined)], [[], [], []]);
+  const gp = { role: "git-init", space: "s0", name: "api", folder: "/home/tester/notes", machine: null, overlay: "oG" };
+  host.files = { "/home/tester/lg/state.yml": "lastupdatecheck: 0\nrecentrepos:\n    - /home/tester/notes\n    - /repo/api\n    - '/repo/gone'\n    - \"/home/tester/dots\"\nstartuppopupversion: 5\n" };
+  // (notes has a .git that git won't read: not a repo here, and never offered as one.)
+  const realRepos = new Set(["/repo/api", "/home/tester/dots", "/home/tester/notes"]);
+  let initAnswer = { code: 0, stdout: "Initialized empty Git repository\n", stderr: "" };
+  host.execHook = (command, args) => {
+    if (command === "git" && args[0] === "var") return { code: 0, stdout: "main\n", stderr: "" };
+    if (command === "lazygit") return { code: 0, stdout: "/home/tester/lg\n", stderr: "" };
+    if (command === "sh") return { code: 0, stdout: args.slice(3).filter(d => realRepos.has(d)).join("\n") + "\n", stderr: "" };
+    if (command === "git" && args[0] === "init") return initAnswer;
+  };
+  host.shared.set("layout", "ram");
+  host.execs = [];
+  let gv = view(gp);
+  assert(gv.gitView.branch.focused, "the branch name has the keyboard");
+  await settle();
+  const GV = () => R(gv, gp);
+  let gt2 = GV();
+  for (const want of ["GIT", "api \u00b7 ~/notes", "~/notes isn't in a git repository.", "Its first branch: the name typed, else git's default (main)",
+    "Create a repo here", "git init, then lazygit", "Open a recent repo \u25b8", "2 of lazygit's, to open instead", "\u2191\u2193 choose \u00b7 Enter open \u00b7 Esc close"])
+    assert(textOf(gt2).includes(want), want);
+  assert.deepEqual(host.execs.map(e => [e.command, e.args[0], e.opts?.on ?? null]), [["git", "var", null], ["lazygit", "--print-config-dir", null], ["sh", "-c", null]],
+    "git's default branch, lazygit's list and which of its repos still are, on the space's machine");
+  assert.equal(textOf(withId(gt2, "git-create"))[0], "\u25b8", "Create is chosen first");
+  const gkey = k => { host.stopped = false; withId(GV(), "git-init").handlers.on_key_down({ key: k }, cx); };
+  gkey("down");
+  assert.deepEqual([textOf(withId(GV(), "git-recent-open"))[0], host.stopped], ["\u25b8", true], "down: the recent repos");
+  gkey("up");
+  assert.equal(textOf(withId(GV(), "git-create"))[0], "\u25b8");
+  host.stopped = false;
+  gkey("enter");
+  assert(!host.stopped, "Enter in the name field is its own (submit)");
+  // Enter (submit) on Create, no name: git init with git's default, in that folder; then
+  // every copy looks there again, and RAM's strip opens lazygit there.
+  host.execs = []; host.closed = [];
+  gv.gitView.branch.handlers.submit({}, cx); await settle();
+  assert.deepEqual(host.execs.map(e => [e.args, e.opts]), [[["init"], { cwd: "/home/tester/notes", on: null }]]);
+  assert.deepEqual([host.shared.get("ram.git.again")?.folder, host.shared.get("ram.git.again")?.on], ["/home/tester/notes", null]);
+  const req = host.shared.get("ram.tool.open");
+  assert.deepEqual([req.kind, req.space, req.folder], ["lazygit", "s0", "/home/tester/notes"], "RAM's strip opens it, by its own rules");
+  assert.deepEqual(host.closed, ["oG"], "and the dialog closes");
+  // A name: that first branch.
+  gv = view(gp); await settle();
+  gv.gitView.branch.set_value("trunk");
+  host.execs = [];
+  gv.gitView.branch.handlers.submit({}, cx); await settle();
+  assert.deepEqual(host.execs.at(-1).args, ["init", "--initial-branch=trunk"]);
+  // git says no: its error shows, the dialog stays.
+  initAnswer = { code: 128, stdout: "", stderr: "hint: something\nfatal: invalid initial branch name: 'a b'\n" };
+  gv = view(gp); await settle();
+  gv.gitView.branch.set_value("a b");
+  host.closed = [];
+  click(R(gv, gp), "git-create"); await settle();
+  gt2 = R(gv, gp);
+  assert.deepEqual([textOf(withId(gt2, "git-error")), host.closed, textOf(withId(gt2, "git-create"))[1]],
+    [["fatal: invalid initial branch name: 'a b'"], [], "Create a repo here"], "the error, the dialog, and Create again");
+  initAnswer = { code: 0, stdout: "", stderr: "" };
+  // Open a recent repo: lazygit's list (but this folder and what isn't a repo any more).
+  gv = view(gp); await settle();
+  gkey("down");
+  gv.gitView.branch.handlers.submit({}, cx);
+  gt2 = GV();
+  assert.equal(gv.gitView.mode, "recent");
+  assert(gv.gitView.handle.is_focused(), "the list has the keyboard (not the name field)");
+  assert.deepEqual([textOf(withId(gt2, "git-recent-0"))[1], textOf(withId(gt2, "git-recent-1"))[1], withId(gt2, "git-recent-2")], ["/repo/api", "~/dots", undefined]);
+  assert.equal(textOf(withId(gt2, "git-recent-0"))[0], "\u25b8");
+  gkey("down"); gkey("down");
+  assert.equal(textOf(withId(GV(), "git-recent-1"))[0], "\u25b8", "down stops at the last");
+  gkey("left");
+  assert.deepEqual([gv.gitView.mode, gv.gitView.choice, gv.gitView.branch.focused], ["main", 1, true], "\u2190: back, on that row");
+  gkey("enter");
+  assert.equal(gv.gitView.mode, "main", "(Enter is the name field's)");
+  gv.gitView.branch.handlers.submit({}, cx);
+  gkey("down");
+  host.closed = [];
+  gkey("enter");
+  assert.equal(host.shared.get("ram.tool.open").folder, "/home/tester/dots", "Enter: lazygit in that repo");
+  assert.deepEqual(host.closed, ["oG"]);
+  // Clicks do the same; outside RAM, a tab of its own (labelled as the key bar's).
+  host.shared.set("layout", "traveler");
+  gv = view(gp); await settle();
+  click(R(gv, gp), "git-recent-open");
+  host.calls = [];
+  click(R(gv, gp), "git-recent-0");
+  assert.deepEqual(host.calls, [{ name: "tab.new", args: { space: "s0", name: "lazygit api", folder: "/repo/api",
+    argv: ["exec", "sh", "-c", 'hc label "$HC_TERMINAL_ID" "ram.lazygit=$PWD" >/dev/null 2>&1; exec lazygit'] } }]);
+  gv = view(gp); await settle();
+  host.calls = [];
+  click(R(gv, gp), "git-create"); await settle();
+  assert.deepEqual([host.calls.at(-1)?.args?.name, host.calls.at(-1)?.args?.folder], ["lazygit notes", "/home/tester/notes"]);
+  assert.deepEqual(gi2.LAZY_ARGV, ["exec", "sh", "-c", 'hc label "$HC_TERMINAL_ID" "ram.lazygit=$PWD" >/dev/null 2>&1; exec lazygit']);
+  host.shared.set("layout", "ram");
+  // No lazygit (or no recent repos): that row says so and does nothing.
+  host.execHook = (command, args) => {
+    if (command === "git" && args[0] === "var") return { code: 1, stdout: "", stderr: "" };
+    if (command === "lazygit") return { code: 127, stdout: "", stderr: "not found" };
+  };
+  gv = view(gp); await settle();
+  gt2 = R(gv, gp);
+  assert(textOf(gt2).includes("lazygit has none") && textOf(gt2).includes("Its first branch: the name typed, else git's default (master)"),
+    "an older git: master");
+  click(gt2, "git-recent-open");
+  assert.equal(gv.gitView.mode, "main", "nothing to open");
+  withId(R(gv, gp), "git-init").handlers.on_key_down({ key: "down" }, cx);
+  gv.gitView.branch.handlers.submit({}, cx);
+  assert.equal(gv.gitView.mode, "main", "nor by Enter");
+  host.execHook = null; host.files = {};
+  // RAM's strip takes the request once (fresh ones only): lazygit there, labelled with it.
+  host.shared.set("ram.zoom", "space");
+  const toolReq = { at: Date.now(), kind: "lazygit", space: "s0", folder: "/home/tester/notes" };
+  host.shared.set("ram.tool.open", toolReq);
+  host.execs = []; host.hcs = [];
+  R(map, {}); await settle();
+  assert.deepEqual(host.execs.filter(e => e.command === "herdr-app").map(e => e.args.slice(4, 8)), [["--name", "lazygit notes", "--folder", "/home/tester/notes"]]);
+  assert.deepEqual(host.hcs.at(-1), ["label", "tNEW", "ram.lazygit=/home/tester/notes"]);
+  assert.equal(host.shared.get("ram.tool.open"), null, "taken");
+  host.shared.set("ram.tool.open", toolReq);   // (as if its clearing hadn't landed yet)
+  host.execs = [];
+  R(map, {}); await settle();
+  assert.equal(host.execs.filter(e => e.command === "herdr-app").length, 0, "once");
+  host.shared.set("ram.tool.open", { at: Date.now() - 60000, kind: "lazygit", space: "s0", folder: "/x" });
+  R(map, {}); await settle();
+  assert.equal(host.execs.filter(e => e.command === "herdr-app").length, 0, "an old one is left alone");
+  host.shared.set("ram.tool.open", null);
+  // Every copy's git looks again at the folder made a repo (and the folders under it).
+  const { Git: G2, GIT_AGAIN } = await import(gitURL);
+  assert.equal(GIT_AGAIN, "ram.git.again");
+  const g2 = new G2();
+  const gsp = [{ id: "x", name: "notes", machine: null, folder: "/home/tester/notes", tabs: [{ id: "a", active: true }, { id: "b", active: false }] }];
+  const gps = [{ pane: "pa", terminal: "ta", tab: "a", cwd: "/home/tester/notes/src", program: { shell: true } },
+    { pane: "pb", terminal: "tb", tab: "b", cwd: "/home/tester/other", program: { shell: true } }];
+  const first = g2.due(Date.now(), gsp, gps);
+  for (const k of first) g2.git[k] = null;
+  host.shared.delete("ram.git.again");
+  assert.equal(g2.due(Date.now(), gsp, gps).size, 0, "known and not repos: not asked again");
+  host.shared.set("ram.git.again", { at: 123, on: null, folder: "/home/tester/notes/" });
+  assert.deepEqual([...g2.due(Date.now(), gsp, gps)], [JSON.stringify([null, "/home/tester/notes/src"])], "the folder under it, not the other");
+  assert.equal(g2.due(Date.now(), gsp, gps).size, 0, "once");
+  host.shared.set("ram.git.again", { at: 124, on: "pc", folder: "/home/tester" });
+  assert.equal(g2.due(Date.now(), gsp, gps).size, 0, "another machine's folder isn't this one");
+  host.shared.delete("ram.git.again");
+  spaces[0].folder = "/repo/api";
+}
+console.log("PASS: GIT's dialog (a folder that isn't a repo): lazygit's questions as a menu; Create runs git init (the name typed, else git's default) and opens lazygit; Open a recent repo lists lazygit's; RAM's strip opens it; every copy's git looks again");
+
+// ---- Follow: SP to each agent that needs you, then back --------------------------------
 // Fixture: t2 (api, &2) and t6 (web, &1) need you; t6 has waited longer. You're on api *1.
 const show = (spaceId, tabId) => {
   for (const s of spaces) { s.active = s.id === spaceId; if (s.active) s.tabs.forEach(t => t.active = t.id === tabId); }
@@ -1549,19 +1827,23 @@ assert.equal(focusCalls().length, 0, "on t2 (needs you): t7 waits");
 show("s3", "tab3-1");
 R(fmap, {}); await settle();
 assert.equal(focusCalls().length, 0, "you picked a tab yourself: follow leaves you there");
-// Only meta follows; and off is off.
+// In the space level follow moves SP too, never the screen: t9 asks, and t2 (waiting
+// longest, api &2) gets SP.
 host.shared.set("ram.zoom", "space");
 agentList[8].status = "blocked"; raw[8].status_ms = Date.now() + 9;
+host.calls = [];
 R(fmap, {}); await settle();
-assert.equal(focusCalls().length, 0, "in the space level nothing follows");
+assert.equal(focusCalls().length, 0, "in the space level the screen stays");
+assert.deepEqual(host.shared.get("ram.sp"), { space: "s0", tab: "tab0-1", pane: "p1" }, "SP moves to it");
+// Off is off.
 host.shared.set("ram.zoom", "meta"); host.shared.set("ram.follow", false);
 R(fmap, {}); await settle();
 assert.equal(focusCalls().length, 0);
-// ^b f: on, and into meta.
+// ^b f: on or off, in the level you're in.
 host.shared.set("ram.zoom", "space");
 await send("follow");
 assert.equal(host.shared.get("ram.follow"), true);
-assert.equal(host.shared.get("ram.zoom"), "meta", "^b f outside meta turns it on and shows meta");
+assert.equal(host.shared.get("ram.zoom"), "space", "^b f turns it on where you are: follow works in both levels");
 await send("follow");
 assert.equal(host.shared.get("ram.follow"), false, "again: off");
 assert.equal(keysFile[`mod:${BAR}`].f, `${BAR}.ram.follow`);
@@ -1581,7 +1863,7 @@ raw.forEach((r, i) => { if (i < 10) r.status_ms = now - i * 1000; });
   fb.size = { width: 1600, height: 700 };
   const FB = async () => { R(fb, {}); await settle(); };
   const selects = () => host.calls.filter(c => c.name === "space.select" || c.name === "tab.select");
-  const back = [{ name: "space.select", args: { id: "s3" } }, { name: "tab.select", args: { id: "tab3-1" } }];
+  const back = [{ name: "tab.select", args: { id: "tab3-1" } }];
   const t2 = agentList[1], t6 = agentList[5];
   const ask = (a, i) => { a.status = "blocked"; raw[i].status_ms = Date.now(); };
   const focus = terminal => ({ name: "agent.focus", args: { terminal } });
@@ -1682,12 +1964,433 @@ raw.forEach((r, i) => { if (i < 10) r.status_ms = now - i * 1000; });
   raw.forEach((r, i) => { if (i < 10) r.status_ms = now - i * 1000; });
   host.shared.set("ram.follow", false);
 }
+// In the space level: SP goes to each agent that needs you and back, and the screen
+// stays where you work. The meta button turns red while SP's agent needs you.
+{
+  const fs = view({});
+  fs.size = { width: 1600, height: 700 };
+  // (A tree can't come out of an async function: the recorder answers "then", so it
+  // would pass for a promise. Render, settle, then render again to look.)
+  const FS = async () => { R(fs, {}); await settle(); };
+  const t2 = agentList[1], t6 = agentList[5];
+  const metaButton = () => withId(R(fs, {}), "ram-level-meta");
+  const moves = () => host.calls.filter(c => ["agent.focus", "tab.select", "space.select", "pane.focus"].includes(c.name));
+  host.shared.set("ram.zoom", "space"); host.shared.set("ram.follow", true);
+  host.shared.set("ram.sp", { space: "s3", tab: "tab3-1", pane: null });
+  t2.status = "idle";
+  show("s0", "tab0-0"); host.calls = [];
+  await FS();
+  assert.deepEqual(host.shared.get("ram.sp"), { space: "s1", tab: "tab1-0", pane: "p5" }, "SP to t6, web *1");
+  assert.deepEqual(moves(), [], "nothing else moves");
+  assert.deepEqual(op(metaButton(), "border_color"), ["#ff5f6d"], "meta's button is red: SP's agent needs you");
+  assert.equal(op(metaButton(), "tooltip")[0], "meta: SP is on an agent that needs you");
+  assert(flatten(metaButton()).some(n => n.ops.some(([k, prop]) => k === "loop" && prop === "opacity")), "and pulses");
+  t6.status = "working";
+  await FS();
+  assert.deepEqual(host.shared.get("ram.sp"), { space: "s3", tab: "tab3-1", pane: null }, "answered: SP goes back");
+  assert.notDeepEqual(op(metaButton(), "border_color"), ["#ff5f6d"], "and the button calms down");
+  assert.deepEqual(moves(), [], "the screen never moved");
+  // Then into meta: it shows SP, where follow left it.
+  t6.status = "blocked"; raw[5].status_ms = Date.now() + 20;
+  await FS();
+  assert.deepEqual(host.shared.get("ram.sp"), { space: "s1", tab: "tab1-0", pane: "p5" });
+  host.shared.set("ram.zoom", "meta"); host.calls = [];
+  await FS();
+  assert.deepEqual(host.calls.filter(c => c.name === "pane.focus" || c.name === "tab.select"), [{ name: "pane.focus", args: { pane: "p5" } }],
+    "meta shows SP: t6's pane");
+  // You answer it there: SP goes back to where it was before follow's move.
+  show("s1", "tab1-0"); await FS();
+  t6.status = "working"; host.calls = [];
+  await FS();
+  assert.deepEqual(moves(), [{ name: "tab.select", args: { id: "tab3-1" } }], "answered in meta: back (the way back lived through the level change)");
+  show("s3", "tab3-1"); await FS();
+  t2.status = "blocked"; t6.status = "blocked";
+  raw.forEach((r, i) => { if (i < 10) r.status_ms = now - i * 1000; });
+  host.shared.set("ram.follow", false);
+}
 show("s0", "tab0-0");
-host.shared.set("ram.from", { s0: "tab0-0" });
+host.shared.set("ram.bp", { s0: "tab0-0" }); host.shared.set("ram.frame", "s0"); host.shared.set("ram.sp", { space: "s0", tab: "tab0-0", pane: null });
 host.shared.set("ram.zoom", "space"); host.calls = [];
-console.log("PASS: follow (meta, its f under the sticks' +): shows the agent waiting longest, waits while yours needs you, moves on once answered, never undoes your own pick, and goes straight back to your tab after the last answer (unless it closed or you moved), without missing an agent that asks again; ^b f");
+console.log("PASS: follow (its f under the sticks' +, ^b f, in either level): SP to the agent waiting longest, waits while yours needs you, moves on once answered, never undoes your own pick, and goes straight back after the last answer (unless it closed or you moved), without missing an agent that asks again; in the space level only SP moves and meta's button turns red");
 
-// ---- Hunk level -------------------------------------------------------------------
+// ---- RET: follow's return address, a dim mark on that frame while follow is away ------------
+{
+  const fr = view({});
+  fr.size = { width: 1600, height: 700 };
+  const FRR = async () => { R(fr, {}); await settle(); };
+  const t2 = agentList[1], t6 = agentList[5];
+  const ptrText = id => textOf(withId(RR(), `ptr-${id}`));
+  const ptrColors = id => flatten(withId(RR(), `ptr-${id}`)).filter(n => n.kind === "div").map(n => op(n, "text_color")?.[0]);
+  host.shared.set("ram.zoom", "meta"); host.shared.set("ram.follow", true);
+  host.shared.set("ram.bp", { s3: "tab3-0" });
+  t2.status = "idle";   // only t6 (web *1) needs you
+  show("s3", "tab3-1");
+  await FRR();
+  assert.deepEqual(host.shared.get("ram.ret"), { space: "s3", tab: "tab3-1", pane: null }, "follow's first move: the return address");
+  show("s1", "tab1-0"); await FRR();   // (its move shows: SP is on web *1)
+  assert.deepEqual(host.shared.get("ram.ret"), { space: "s3", tab: "tab3-1", pane: null }, "kept while t6 needs you");
+  rams.size = { width: 1400, height: 340 };
+  assert.deepEqual(ptrText("tab3-1"), ["RET\u25b8"], "a RET mark on docs &2");
+  assert.deepEqual(ptrColors("tab3-1"), ["#ffb54788"], "in SP's amber, dimmed");
+  assert.equal(op(withId(RR(), "ptr-tab3-1"), "tooltip")[0], "RET: follow takes SP back here once you've answered");
+  assert.equal(textOf(withId(RR(), "frame-tab3-1"))[1], "*2", "a pointer points there: *2");
+  assert(widthOf(withId(RR(), "ptr-tab3-1")) >= [..."RET\u25b8"].length * 10.5 * 1.25 * 0.6, "RET\u25b8 fits its column");
+  // On docs' BP: both, by their initials.
+  host.shared.set("ram.bp", { s3: "tab3-1" });
+  assert.deepEqual(ptrText("tab3-1"), ["B", "R", "\u25b8"]);
+  assert.equal(op(withId(RR(), "ptr-tab3-1"), "tooltip")[0], "BP: docs's work tab \u00b7 RET: follow takes SP back here once you've answered");
+  host.shared.set("ram.bp", { s3: "tab3-0" });
+  // You answer: SP goes back, and the mark goes.
+  show("s1", "tab1-0"); await FRR();
+  t6.status = "working"; await FRR();
+  show("s3", "tab3-1"); await FRR();
+  assert.equal(host.shared.get("ram.ret"), null, "home: no return address");
+  assert(!ptrText("tab3-1").some(x => x.startsWith("RET") || x === "R"), "no RET mark");
+  // follow off while away: the mark goes too.
+  t6.status = "blocked"; raw[5].status_ms = Date.now() + 30;
+  await FRR();
+  assert(host.shared.get("ram.ret"));
+  host.shared.set("ram.follow", false); await FRR();
+  assert.equal(host.shared.get("ram.ret"), null, "follow off: no return address");
+  t2.status = "blocked"; t6.status = "blocked";
+  raw.forEach((r, i) => { if (i < 10) r.status_ms = now - i * 1000; });
+  show("s0", "tab0-0");
+  host.shared.set("ram.bp", { s0: "tab0-0" }); host.shared.set("ram.frame", "s0"); host.shared.set("ram.sp", { space: "s0", tab: "tab0-0", pane: null });
+  host.shared.set("ram.zoom", "space"); await FRR();
+}
+console.log("PASS: RET: while follow is away, a dim RET\u25b8 marks its return address (BR\u25b8 on a BP); it goes once SP is back or follow is off");
+
+// ---- Commands running in your tabs, in HEAP (procs.js) ------------------------------------------
+{
+  const pr = await import(await load("mods/ram/procs.js"));
+  const realNow = Date.now;
+  let skew = 0;
+  Date.now = () => realNow() + skew;
+  const later = ms => { skew += ms; };
+  const shellProg = { key: "shell", name: "zsh", shell: true, agent: false };
+  const cargo = { key: "cargo", name: "Cargo", shell: false, agent: false };
+  // web &2 runs a shell, its terminal tB.
+  const term = { address: "tB", state: "live", created_ms: 9800, labels: {}, program: shellProg, foreground: { pid: 600, argv: ["zsh", "-i"] } };
+  raw.push(term);
+  panes.push({ pane: "pB", terminal: "tB", tab: "tab1-1", title: "zsh", status: null, focused: false, cwd: "/repo/web", program: shellProg });
+  const runs = (program, argv, pid) => Object.assign(term, { program, foreground: { pid, argv } });
+  // What counts as a command: not a shell at its prompt, an agent, a sub-agent, a tool's
+  // tab, or a program that waits for you; an interpreter alone is a REPL.
+  const c = (program, argv, extra = {}) => pr.command({ state: "live", labels: {}, program, foreground: { pid: 1, argv }, ...extra });
+  assert.deepEqual(c(cargo, ["cargo", "test"]), { pid: 1, name: "Cargo" });
+  assert.equal(c(shellProg, ["zsh"]), null, "a shell at its prompt");
+  assert.equal(c({ key: "kiro", name: "Kiro", agent: true }, ["kiro-cli"]), null, "an agent");
+  assert.equal(c(cargo, ["cargo"], { status: "working" }), null, "a terminal reporting a status is an agent's");
+  assert.equal(c(cargo, ["cargo"], { parent: "t1" }), null, "a sub-agent");
+  assert.equal(c(cargo, ["cargo"], { labels: { "ram.lazygit": "/r" } }), null, "a tool's tab");
+  for (const [key, argv] of [["nvim", ["nvim", "x"]], ["lazygit", ["lazygit"]], ["less", ["less", "f"]], ["htop", ["top"]], ["ssh", ["ssh", "pc"]], ["program", ["fzf"]], ["program", ["hunk", "diff"]]])
+    assert.equal(c({ key, name: key }, argv), null, `${argv[0]} waits for you`);
+  assert.equal(c({ key: "python", name: "Python" }, ["python3"]), null, "a REPL");
+  assert.deepEqual(c({ key: "python", name: "Python" }, ["python3", "x.py"]), { pid: 1, name: "Python" }, "a script runs");
+  assert.equal(c({}, []), null, "nothing known: not a command");
+  assert.deepEqual([pr.lastLine("\x1b[32mok\x1b[0m 12 tests\r\nlast \x1b]0;t\x07line  \n\n  \n"), pr.lastLine(""), pr.lastLine("x".repeat(200)).length],
+    ["last line", "", 160], "the last line with text, colors and controls out, 160 at most");
+  assert(pr.sameProcs({ a: { x: 1 }, b: { y: 2 } }, { b: { y: 2 }, a: { x: 1 } }) && !pr.sameProcs({ a: 1 }, { a: 2 }), "key order aside");
+  // The strip's copy keeps a command the moment it sees it run: no wait.
+  host.shared.delete("ram.procs");
+  const pmBefore = host.timers.length;
+  const pm = view({});
+  const pmTail = host.timers.slice(pmBefore).find(tm => tm.ms === 2000);   // its last-lines reader
+  show("s0", "tab0-0");
+  runs(cargo, ["cargo", "test"], 700);
+  pm.trackProcs();
+  const counted = host.shared.get("ram.procs").tB;
+  assert.deepEqual([counted.pid, counted.name, counted.done, counted.line], [700, "Cargo", null, null], "at once");
+  assert(Math.abs(Date.now() - counted.since) < 300, "since now");
+  later(1000); pm.trackProcs();
+  assert.equal(host.shared.get("ram.procs").tB, counted, "the same command: kept as it is");
+  runs({ key: "npm", name: "npm" }, ["npm", "test"], 699); pm.trackProcs();
+  assert.deepEqual([host.shared.get("ram.procs").tB.name, host.shared.get("ram.procs").tB.pid], ["npm", 699], "another command (the one between not seen): that one");
+  runs(cargo, ["cargo", "test"], 700); pm.trackProcs();
+  host.hcs = [];
+  pmTail.fn(cx); await settle();
+  assert.deepEqual(host.hcs, [["read", "tB"]], "the strip's copy reads its last line too (every 2 s)");
+  // The space level's column (web): its row, working, with its last output line.
+  show("s1", "tab1-0");
+  host.shared.set("ram.zoom", "space");
+  const ps = view({ role: "side" });
+  ps.size = { width: 340, height: 900 };
+  let pt = R(ps, { role: "side" });
+  assert.deepEqual(textOf(withId(pt, "heap-tB")), ["&2", "Cargo", "", "Working"], "web &2, Cargo, (no line read yet here), Working");
+  assert(textOf(pt).includes("HEAP \u2191  3"), "HEAP counts it: web's two agents and it");
+  host.hcs = []; host.readOut = "Compiling ram v0.1.0\n   Running 48 tests\n";
+  host.timers.filter(tm => tm.ms === 2000).at(-1).fn(cx); await settle();
+  assert.deepEqual(host.hcs, [["read", "tB"]], "the column reads the running commands of the space it shows");
+  pt = R(ps, { role: "side" });
+  assert.deepEqual(textOf(withId(pt, "heap-tB")), ["&2", "Cargo", "Running 48 tests", "Working"], "and shows their last lines");
+  host.readOut = "/repo/web/src/lib.rs:3: warning: unused\n";
+  host.timers.filter(tm => tm.ms === 2000).at(-1).fn(cx); await settle();
+  assert.equal(textOf(withId(R(ps, { role: "side" }), "heap-tB"))[2], "/repo/web/src/lib.rs:3: warning: unused", "whatever it says (a path too)");
+  host.readOut = "Compiling ram v0.1.0\n   Running 48 tests\n";
+  host.timers.filter(tm => tm.ms === 2000).at(-1).fn(cx); await settle();
+  pt = R(ps, { role: "side" });
+  host.shared.set("ram.zoom", "meta");
+  host.hcs = [];
+  host.timers.filter(tm => tm.ms === 2000).at(-1).fn(cx); await settle();
+  assert.deepEqual(host.hcs, [], "(not in meta: the column is the main stick there)");
+  host.shared.set("ram.zoom", "space");
+  pmTail.fn(cx); await settle();
+  host.readOut = null;
+  assert(op(withId(pt, "heap-tB"), "tooltip")[0].startsWith("Cargo: Running 48 tests \u00b7 web / 2 \u00b7 working") &&
+    op(withId(pt, "heap-tB"), "tooltip")[0].endsWith("click: peek at its output"));
+  // A click (or Enter) peeks at its output, over the tab you're on.
+  host.calls = [];
+  click(pt, "heap-tB");
+  assert.deepEqual(host.calls, [{ name: "terminal.peek", args: { terminal: "tB" } }]);
+  // Not agents: agent.next and follow don't see it.
+  R(pm, {}); await settle();
+  assert(!host.order.includes("tB"), "not in agent.next's order");
+  // It ends while you're on web &1: done, with its last line, until you look.
+  runs(shellProg, ["zsh", "-i"], 600);
+  later(1000); pm.trackProcs();
+  const ended = host.shared.get("ram.procs").tB;
+  assert.deepEqual([ended.done != null, ended.line], [true, "Running 48 tests"], "done, keeping its last line (the strip read it)");
+  pt = R(ps, { role: "side" });
+  assert.deepEqual(textOf(withId(pt, "heap-tB")), ["&2", "Cargo", "Running 48 tests", "Done"]);
+  assert.deepEqual(op(withId(pt, "heap-tB"), "bg"), ["#12423caa"], "lit as a finished agent's");
+  host.hcs = [];
+  pmTail.fn(cx); await settle();
+  host.timers.filter(tm => tm.ms === 2000).at(-1).fn(cx); await settle();
+  assert.deepEqual(host.hcs, [], "a done one isn't read again (its screen is your prompt now)");
+  assert(textOf(withId(pt, "stack-s1")).includes("+1"), "web's +1 counts it");
+  // In meta: its stick's row and its block, done.
+  host.shared.set("ram.zoom", "meta");
+  pt = RR();
+  assert(withId(pt, "alloc-tB") && textOf(withId(pt, "alloc-tB")).includes("Running 48 tests"), "the stick's heap row, with its last line");
+  assert.deepEqual([op(withId(pt, "block-tB"), "bg")[0], op(withId(pt, "block-tB"), "border_color")[0]], ["#12423c", "#6fe3d3"], "its block, done");
+  assert(textOf(withId(pt, "head-s1")).includes("+1"));
+  const ms = view({ role: "side" }); ms.size = { width: 390, height: 1400 };
+  assert(withId(R(ms, { role: "side" }), "all-heap-tB"), "the main stick lists it too");
+  host.shared.set("ram.zoom", "space");
+  // A running one shows its block working.
+  // You look at web &2: seen, gone (the strip's copy looks as it draws, too).
+  show("s1", "tab1-1");
+  R(pm, {}); await settle();
+  assert.equal(host.shared.get("ram.procs").tB, undefined, "seen");
+  assert(!withId(R(ps, { role: "side" }), "heap-tB"));
+  // It ends while you look: never done. While the window is inactive: done.
+  runs(cargo, ["cargo", "build"], 701); pm.trackProcs();
+  assert(host.shared.get("ram.procs").tB && !host.shared.get("ram.procs").tB.done, "running on the tab you're on: still listed");
+  runs(shellProg, ["zsh", "-i"], 600); pm.trackProcs();
+  assert.equal(host.shared.get("ram.procs").tB, undefined, "ended where you looked: gone");
+  runs(cargo, ["cargo", "build"], 702); pm.trackProcs();
+  host.active = false;
+  runs(shellProg, ["zsh", "-i"], 600); pm.trackProcs();
+  assert(host.shared.get("ram.procs").tB?.done, "ended while the window wasn't active: done");
+  host.active = true;
+  // Peeking at a done one is seeing it.
+  show("s1", "tab1-0");
+  host.calls = [];
+  click(R(ps, { role: "side" }), "heap-tB");
+  assert.deepEqual([host.calls, host.shared.get("ram.procs").tB], [[{ name: "terminal.peek", args: { terminal: "tB" } }], undefined]);
+  // A short one shows too, and ends done (it ran where you weren't looking); a new
+  // command there replaces a done mark; a closed tab drops it.
+  runs({ key: "program", name: "ls" }, ["ls"], 703); pm.trackProcs();
+  assert.equal(host.shared.get("ram.procs").tB.name, "ls", "an ls shows at once");
+  runs(shellProg, ["zsh", "-i"], 600); pm.trackProcs();
+  assert(host.shared.get("ram.procs").tB.done, "and stays done until you look");
+  runs(cargo, ["cargo", "run"], 703); pm.trackProcs();
+  assert.deepEqual([host.shared.get("ram.procs").tB.name, host.shared.get("ram.procs").tB.done], ["Cargo", null],
+    "a new command there replaces it (even one given the same pid)");
+  // The exit history is the agents': a command never shows there as freed.
+  host.shared.set("ram.zoom", "meta");
+  RR();   // (the sticks keep the exit history as they draw)
+  assert(rams.history.length > 0 && !rams.history.some(a => a.address === "tB"));
+  host.shared.set("ram.zoom", "space");
+  raw.splice(raw.indexOf(term), 1);
+  panes.splice(panes.findIndex(p => p.pane === "pB"), 1);
+  pm.trackProcs();
+  assert.deepEqual(host.shared.get("ram.procs"), {}, "its terminal gone: dropped");
+  Date.now = realNow;
+  host.shared.delete("ram.procs");
+  show("s0", "tab0-0");
+  host.shared.set("ram.zoom", "space");
+}
+console.log("PASS: commands in HEAP: a shell's command shows the moment it runs (not agents, sub-agents, tools or programs that wait for you), working with its last line, done until you look (or peek), and a click peeks at it");
+
+// ---- SP and BP: the two levels' places ------------------------------------------------------
+// SP (shared ram.sp) is the tab meta shows: there's one, and it jumps. Each space has a
+// BP (ram.bp), its work tab, which the space level shows in it; the space you work in
+// (ram.frame) has the bright one. A level change shows that level's place.
+{
+  const pm = view({});
+  pm.size = { width: 1600, height: 700 };
+  const PM = async () => { R(pm, {}); await settle(); };
+  const moves = () => host.calls.filter(c => ["tab.select", "pane.focus", "space.select"].includes(c.name));
+  host.shared.set("ram.zoom", "space");
+  host.shared.set("ram.sp", { space: "s1", tab: "tab1-0", pane: null });
+  host.shared.set("ram.bp", { s0: "tab0-0" }); host.shared.set("ram.frame", "s0");
+  show("s0", "tab0-0");
+  await PM();
+  // Into meta: SP's tab shows. Until it has, what still shows isn't taken for SP.
+  host.shared.set("ram.zoom", "meta"); host.calls = [];
+  await PM();
+  assert.deepEqual(moves(), [{ name: "tab.select", args: { id: "tab1-0" } }], "meta shows SP's tab");
+  await PM();
+  assert.deepEqual(host.shared.get("ram.sp"), { space: "s1", tab: "tab1-0", pane: null }, "the space level's tab, still showing, isn't SP");
+  show("s1", "tab1-0"); await PM();
+  // In meta what shows is SP: picking a tab moves SP, and the BPs stay.
+  show("s0", "tab0-1"); await PM();
+  assert.deepEqual(host.shared.get("ram.sp"), { space: "s0", tab: "tab0-1", pane: null }, "SP follows what meta shows");
+  assert.deepEqual([host.shared.get("ram.bp"), host.shared.get("ram.frame")], [{ s0: "tab0-0" }, "s0"], "BP and the frame stay");
+  // Back in the space level: the bright BP shows (api *1), and SP stays.
+  host.shared.set("ram.zoom", "space"); host.calls = [];
+  await PM();
+  assert.deepEqual(moves(), [{ name: "tab.select", args: { id: "tab0-0" } }], "the space level shows the bright BP");
+  show("s0", "tab0-0"); await PM();
+  assert.deepEqual(host.shared.get("ram.sp"), { space: "s0", tab: "tab0-1", pane: null }, "SP stays where meta left it");
+  // In the space level what shows is the BP: a tab change moves it; another space is the frame.
+  show("s0", "tab0-1"); await PM();
+  assert.deepEqual(host.shared.get("ram.bp"), { s0: "tab0-1" });
+  show("s1", "tab1-1"); await PM();
+  assert.deepEqual([host.shared.get("ram.bp"), host.shared.get("ram.frame")], [{ s0: "tab0-1", s1: "tab1-1" }, "s1"], "web is where you work now");
+  assert.deepEqual(host.shared.get("ram.sp"), { space: "s0", tab: "tab0-1", pane: null }, "and SP never moved");
+  // SP on a pane: meta shows that pane (pane.focus shows its tab and space too).
+  host.shared.set("ram.sp", { space: "s3", tab: "tab3-0", pane: "p3" });
+  host.shared.set("ram.zoom", "meta"); host.calls = [];
+  await PM();
+  assert.deepEqual(moves(), [{ name: "pane.focus", args: { pane: "p3" } }]);
+  host.focused = { space: "s3", tab: "tab3-0", pane: "p3" }; show("s3", "tab3-0");
+  await PM();
+  assert.deepEqual(host.shared.get("ram.sp"), { space: "s3", tab: "tab3-0", pane: "p3" });
+  host.focused = null;
+  // ^b I (ram.bp): the bright BP moves to SP. In the space level that shows.
+  host.shared.set("ram.zoom", "space"); host.calls = [];
+  await PM();
+  assert.deepEqual(moves(), [{ name: "tab.select", args: { id: "tab1-1" } }], "(the space level at web's BP)");
+  show("s1", "tab1-1"); await PM();
+  host.shared.set("ram.sp", { space: "s0", tab: "tab0-0", pane: null }); host.calls = [];
+  await send("bp");
+  assert.deepEqual([host.shared.get("ram.frame"), host.shared.get("ram.bp").s0], ["s0", "tab0-0"], "^b I: api is where you work, at SP's tab");
+  assert.deepEqual(moves(), [{ name: "tab.select", args: { id: "tab0-0" } }], "in the space level it shows");
+  show("s0", "tab0-0"); await PM();
+  // From meta it only moves the BP (the sticks show it), unless e is on.
+  host.shared.set("ram.zoom", "meta");
+  await PM();
+  show("s3", "tab3-1"); await PM();
+  host.calls = [];
+  await send("bp");
+  assert.deepEqual([host.shared.get("ram.frame"), host.shared.get("ram.bp").s3, host.shared.get("ram.zoom")], ["s3", "tab3-1", "meta"],
+    "from meta: docs &2 is the bright BP, and you stay in meta");
+  assert.deepEqual(moves(), []);
+  host.shared.set("ram.enter", true);
+  show("s1", "tab1-0"); await PM();
+  await send("bp");
+  assert.deepEqual([host.shared.get("ram.frame"), host.shared.get("ram.bp").s1, host.shared.get("ram.zoom")], ["s1", "tab1-0", "space"],
+    "e on: into the space level, at SP's tab");
+  await PM();
+  assert.deepEqual(moves(), [], "it shows already: nothing to do");
+  host.shared.delete("ram.enter");
+  // A click on SP's mark in a stick does what ^b I does.
+  host.shared.set("ram.zoom", "meta");
+  await PM();
+  show("s0", "tab0-1"); await PM();
+  let mt3 = RR();
+  host.stopped = false;
+  click(mt3, "ptr-tab0-1");
+  assert(host.stopped, "(the click stays off the frame)");
+  assert.deepEqual([host.shared.get("ram.frame"), host.shared.get("ram.bp").s0, host.shared.get("ram.zoom")], ["s0", "tab0-1", "meta"]);
+  mt3 = RR();
+  assert.deepEqual(textOf(withId(mt3, "ptr-tab0-1")), ["S", "B", "\u25b8"], "SP and the bright BP on one frame");
+  assert.deepEqual(textOf(withId(mt3, "ptr-tab0-0")), [], "api's old work tab: no mark");
+  assert(textOf(withId(mt3, "ptr-tab1-0")).includes("BP\u25b8"), "web keeps its (dim) BP");
+  // e: the square under f (off by default), and ^b e.
+  assert.deepEqual(op(withId(mt3, "ram-enter"), "border_color"), [host.colors.input], "e is off by default");
+  assert(op(withId(mt3, "ram-enter"), "tooltip")[0].endsWith("  ^b e"), "its tooltip says its key");
+  click(mt3, "ram-enter");
+  assert.equal(host.shared.get("ram.enter"), true);
+  assert.deepEqual(op(withId(RR(), "ram-enter"), "border_color"), ["#ffb547"], "lit while on");
+  await send("enter");
+  assert.equal(host.shared.get("ram.enter"), false, "^b e: off again");
+  // A tool from meta (e off) shows in meta: SP moves onto it, and back when you quit it.
+  show("s0", "tab0-0"); await PM();
+  spaces[0].tabs.push({ id: "tabLG2", name: "lazygit api", named: true, index: 3, active: false, settled: false, status: null });
+  panes.push({ pane: "pLG2", terminal: "tLG2", tab: "tabLG2", title: "lazygit", status: null, focused: true, cwd: "/repo/api", program: { name: "lazygit" } });
+  raw.push({ address: "tLG2", state: "live", created_ms: Date.now(), labels: { "ram.lazygit": "/repo/api" } });
+  show("s0", "tabLG2"); await PM();
+  assert.deepEqual(host.shared.get("ram.sp"), { space: "s0", tab: "tabLG2", pane: null }, "meta shows lazygit: SP is on it");
+  assert.deepEqual(host.shared.get("ram.came"), { level: "meta", space: "s0", tab: "tab0-0", pane: null }, "where SP was is kept");
+  spaces[0].tabs.pop(); panes.pop(); raw.pop();
+  show("s0", "tab0-1"); host.calls = [];
+  await PM();
+  assert.deepEqual(moves(), [{ name: "tab.select", args: { id: "tab0-0" } }], "lazygit quit: SP goes back (not where Herdr went)");
+  show("s0", "tab0-0"); await PM();
+  assert.deepEqual(host.shared.get("ram.sp"), { space: "s0", tab: "tab0-0", pane: null });
+  // e on: the tool takes you into the space level (SP stays put), and quitting it brings
+  // you back to meta, at SP.
+  host.shared.set("ram.enter", true);
+  spaces[0].tabs.push({ id: "tabLG2", name: "lazygit api", named: true, index: 3, active: false, settled: false, status: null });
+  panes.push({ pane: "pLG2", terminal: "tLG2", tab: "tabLG2", title: "lazygit", status: null, focused: true, cwd: "/repo/api", program: { name: "lazygit" } });
+  raw.push({ address: "tLG2", state: "live", created_ms: Date.now(), labels: { "ram.lazygit": "/repo/api" } });
+  host.shared.set("ram.opening", { space: "s0", at: Date.now() }); host.shared.set("ram.zoom", "space");  // (as openTool does)
+  show("s0", "tabLG2"); host.calls = [];
+  await PM();
+  assert.deepEqual(moves(), [], "while it opens, the level change shows nothing of its own");
+  host.shared.set("ram.opening", null);
+  await PM();
+  assert.deepEqual(host.shared.get("ram.came"), { level: "meta", space: "s0", tab: "tab0-0", pane: null }, "it came from meta");
+  assert.deepEqual(host.shared.get("ram.sp"), { space: "s0", tab: "tab0-0", pane: null }, "SP stayed on what you watched");
+  spaces[0].tabs.pop(); panes.pop(); raw.pop();
+  show("s0", "tab0-1"); host.calls = [];
+  await PM();
+  assert.equal(host.shared.get("ram.zoom"), "meta", "lazygit quit: back to meta");
+  await PM();
+  assert.deepEqual(moves(), [{ name: "tab.select", args: { id: "tab0-0" } }], "at SP's tab (ram.goto)");
+  show("s0", "tab0-0"); await PM();
+  host.shared.delete("ram.enter");
+  // ^b P (ram.peek): the peek strip off and on.
+  await send("peek");
+  assert.equal(host.shared.get("ram.peek"), false);
+  await send("peek");
+  assert.equal(host.shared.get("ram.peek"), true);
+  host.shared.delete("ram.peek");
+  // Meta has no peek strip; the space level's shows SP's tab, unless it's the tab you're on.
+  const pk = view({ role: "peek" });
+  host.shared.set("ram.sp", { space: "s1", tab: "tab1-0", pane: null });
+  assert.equal(withId(R(pk, { role: "peek" }), "ram-peek").kids.length, 0, "meta: none");
+  host.shared.set("ram.zoom", "space");
+  assert.deepEqual(withId(R(pk, { role: "peek" }), "ram-peek").kids.map(idOf), ["peek-sp"], "the space level: SP's tab");
+  host.shared.set("ram.sp", { space: "s0", tab: "tab0-0", pane: null });
+  assert.equal(withId(R(pk, { role: "peek" }), "ram-peek").kids.length, 0, "SP is the tab you're on: nothing to peek at");
+  host.shared.set("ram.bp", { s0: "tab0-0" }); host.shared.set("ram.frame", "s0");
+  host.shared.delete("ram.came"); host.calls = [];
+}
+console.log("PASS: SP and BP: meta shows SP and the space level the bright BP; a level change shows its place (what still shows isn't taken for it); ^b I and SP's mark move the BP to SP (from meta into the space level only with e on); a tool from meta (e off) takes SP and gives it back; ^b e, ^b P; no peek strip in meta");
+
+// ---- Finished agents (done, unseen): +n, and brighter in meta ---------------------------------
+{
+  // remote/t3 (ops *1) finished while you weren't looking.
+  host.shared.set("ram.zoom", "space");
+  let ft3 = R(side, { role: "side" });
+  assert(textOf(withId(ft3, "stack-s2")).includes("+1"), "STACK: ops +1");
+  assert.equal(op(flatten(withId(ft3, "stack-s2")).find(n => n.kids.includes("+1")), "border_color")[0], "#6fe3d3", "in done's cyan");
+  assert(!textOf(withId(ft3, "stack-s1")).some(x => /^\u2713\d/.test(x)), "web has none");
+  host.shared.set("ram.zoom", "meta");
+  rams.size = { width: 1400, height: 340 };
+  ft3 = RR();
+  assert(textOf(withId(ft3, "head-s2")).includes("+1"), "its stick's header: +1");
+  const doneBlock = withId(ft3, "block-remote/t3");
+  assert.deepEqual([op(doneBlock, "bg")[0], op(doneBlock, "border_color")[0]], ["#12423c", "#6fe3d3"], "its block: a brighter cell, a cyan outline");
+  const doneRow = withId(ft3, "alloc-remote/t3");
+  assert.deepEqual(op(doneRow, "bg"), ["#12423caa"], "its heap row is lit");
+  const doneWord = flatten(doneRow).find(n => n.kids.includes("Done"));
+  assert(doneWord && op(doneWord, "font_semibold") && op(doneWord, "text_color")[0] === "#6fe3d3", "Done, in bold cyan");
+  assert(textOf(withId(AS(), "all-space-s2")).includes("+1"), "the main stick: +1 too");
+  aside.size = { width: 390, height: 1400 };  // room for every agent's row
+  const doneMain = flatten(withId(AS(), "all-heap-remote/t3")).find(n => n.kids.includes("Done"));
+  assert(doneMain && op(doneMain, "font_semibold") && op(doneMain, "text_color")[0] === "#6fe3d3", "and its heap row's Done is bold cyan");
+  assert.deepEqual(op(withId(AS(), "all-heap-remote/t3"), "bg"), ["#12423caa"]);
+  aside.size = { width: 390, height: 700 };
+  host.shared.set("ram.zoom", "space");
+}
+console.log("PASS: finished agents: +n by their space in STACK, the sticks and the main stick; in meta their blocks and rows are brighter and say Done in bold cyan");
+
+// ---- hunk: reviews in tabs of their own ---------------------------------------------------
 // hunk.js on its own: what each menu item runs, what a review is called, notes.
 const hk = await import(await load("mods/ram/hunk.js"));
 const cmd = id => hk.COMMANDS.find(c => c.id === id);
@@ -1716,39 +2419,62 @@ assert.deepEqual(hk.reduce({ sessionId: "abcd1234", pid: 7, cwd: "/r", repoRoot:
     ["s1", "x1", "ta", "a", false, null], ["s2", "x2", "tb", "a", false, null], ["s3", null, null, null, false, null], [null, "x3", "tc", "a", true, "log"]]);
   assert.deepEqual(hk.entries([{ id: "s4", pid: 30, cwd: "/r" }], ts2, ps2, sp2).map(e => [e.id, e.tab, e.label]), [["s4", "tc", "log"]], "RAM's own, by pid");
 }
-// RAM's review tab (labelled ram.hunk), last in its space: the hunk level.
+// RAM's review tab (labelled ram.hunk), last in its space, opened 5 minutes ago. It
+// shows in the space level (there's no hunk level of its own) as a tool's tab: never a
+// BP, and quitting it comes back.
 spaces[0].tabs.push({ id: "tabNEW", name: "hunk diff", named: true, index: 3, active: false, settled: false, status: null });
 panes.push({ pane: "pNEW", terminal: "tNEW", tab: "tabNEW", title: "hunk", status: null, focused: true, cwd: "/repo/api", program: { name: "hunk" } });
-raw.push({ address: "tNEW", state: "live", created_ms: 9000, pid: 4242, labels: { "ram.hunk": "diff" } });
+raw.push({ address: "tNEW", state: "live", created_ms: Date.now() - 5 * 60000 - 1000, pid: 4242, labels: { "ram.hunk": "diff" } });
 // hunk reports itself like an agent: it isn't one (not in any heap).
 agentList.push({ address: "tNEW", pane: "pNEW", space: "s0", space_name: "api", tab: "tabNEW", tab_name: "hunk diff", tab_index: 3,
   status: "idle", title: "hunk", app: "hunk", program: { name: "Hunk" }, focused: false });
+host.shared.set("ram.zoom", "space");
+R(map, {}); await settle();
 spaces[0].tabs.forEach(t => t.active = t.id === "tabNEW");
-assert.equal(level(), "hunk");
+assert.equal(level(), "space", "no hunk level");
 host.calls = [];
 R(map, {});
 await settle();
-assert.deepEqual(layoutCalls(), [{ name: "layout.resize", args: { id: "ram-map", px: 74 } },
-  { name: "layout.resize", args: { id: "sidebar", px: 280 } }, { name: "layout.show", args: { id: "ram-peek" } },
-  { name: "layout.hide", args: { id: "ram-rams" } }]);
-assert.equal(host.shared.get("ram.from").s0, "tab0-0", "the review's tab isn't remembered as the work tab");
+assert.deepEqual(layoutCalls(), [{ name: "layout.show", args: { id: "ram-peek" } }], "nothing resizes; the peek strip shows (where you came from)");
+assert.equal(host.shared.get("ram.bp").s0, "tab0-0", "the review's tab isn't a BP");
+assert.deepEqual(host.shared.get("ram.came"), { level: "space", space: "s0", tab: "tab0-0", pane: null }, "where you came from is kept");
 assert.deepEqual(host.shared.get("ram.hunk.last"), { s0: "tabNEW" }, "it's the space's last review");
 const stripHunk = R(map, {});
 assert(!withId(stripHunk, "tabchip-tabNEW"), "reviews stay out of the tab strip");
 assert.deepEqual(textOf(withId(stripHunk, "ram-strip-space")), ["0x01", "api", "\u25c61"], "the space says it has one");
-// The side column: HUNK, the open reviews, at the top (no session yet: RAM's label).
+// The side column: HUNK, between GIT and LANG, a line per review of this space (no
+// session yet: RAM's label). Each says what it shows, its notes and how long ago it opened.
 const hside = view({ role: "side" });
-hside.size = { width: 280, height: 700 };
+hside.size = { width: 340, height: 900 };
+hside.gitInfo.git[K("/repo/api")] = side.gitInfo.git[K("/repo/api")];
 tree = R(hside, { role: "side" });
 const sideIds = flatten(tree).map(idOf);
-assert(sideIds.indexOf("ram-hunk") >= 0 && sideIds.indexOf("ram-hunk") < sideIds.indexOf("ram-stack"), "at the top, over the stack");
-assert(textOf(withId(tree, "ram-hunk")).includes("HUNK  1"));
+assert(sideIds.indexOf("ram-git") < sideIds.indexOf("ram-hunk") && sideIds.indexOf("ram-hunk") < sideIds.indexOf("ram-lang"), "HUNK between GIT and LANG");
+assert.deepEqual(textOf(withId(tree, "ram-hunk-head")), ["HUNK", "1", "^b r", "+"]);
 const words = n => textOf(n).filter(x => !x.endsWith(".svg"));  // without icons' file names
-assert.deepEqual(words(withId(tree, "hunk-tNEW")), ["\u25c6", "diff", "api"]);
+assert.deepEqual(words(withId(tree, "hunk-tNEW")), ["\u25c6", "diff", "5m"], "what it shows, how long ago it opened");
+assert.deepEqual(op(withId(tree, "hunk-tNEW"), "bg"), ["#ffb54714"], "the one on screen is lit");
+assert.equal(op(withId(tree, "hunk-tNEW"), "h")[0], 17 * 1.25);
+assert.equal(heightOf(withId(tree, "ram-hunk")), hk.hunkHeight(1), "HUNK is as tall as hunkHeight() counts");
 assert.deepEqual(textOf(withId(tree, "stack-s0")).slice(0, 3), ["0x01", "api", "\u25c61"], "the stack marks the space too");
 assert(!sideIds.includes("heap-tNEW"), "hunk isn't in the heap");
-// A short column fits in the hunk level too: HUNK on top, compact rows.
-sweep("hunk");
+// Only this space's reviews: web's isn't listed under api's HUNK.
+spaces[1].tabs.push({ id: "tabW", name: "hunk log", named: true, index: 3, active: false, settled: false, status: null });
+panes.push({ pane: "pW", terminal: "tW", tab: "tabW", title: "hunk", status: null, focused: false, cwd: "/repo/web", program: { name: "hunk" } });
+raw.push({ address: "tW", state: "live", created_ms: Date.now() - 2 * 3600000, labels: { "ram.hunk": "log" } });
+tree = R(hside, { role: "side" });
+assert(!withId(tree, "hunk-tW") && textOf(withId(tree, "ram-hunk-head"))[1] === "1", "web's review is web's");
+assert.deepEqual(textOf(withId(tree, "stack-s1")).slice(0, 3), ["0x02", "web", "\u25c61"], "(the stack still marks web)");
+spaces[1].tabs.pop(); panes.pop(); raw.pop();
+assert.deepEqual([hk.reviewsIn([{ ram: true, tab: "a", space: "x" }, { ram: false, tab: "b", space: "x" }, { ram: true, tab: null, space: "x" },
+  { ram: true, tab: "c", space: "y" }], "x").map(e => e.tab), hk.forRepo([{ cwd: "/private/tmp/r/" }, { cwd: "/tmp/q" }], "/tmp/r").length], [["a"], 1],
+  "RAM's own reviews in that space; for a repo, /private/tmp is /tmp");
+{
+  const { ago } = await import(await load("mods/ram/ui.js"));
+  const t0 = 10 * 86400000;
+  assert.deepEqual([ago(t0 - 59000, t0), ago(t0 - 60000, t0), ago(t0 - 3599000, t0), ago(t0 - 3600000, t0), ago(t0 - 86400000, t0), ago(t0 + 5000, t0)],
+    ["now", "1m", "59m", "1h", "1d", "now"]);
+}
 // Its session registers: notes and its id show (the map copy polls hunk and shares it).
 host.hunkSessions = [{ sessionId: "9ff4921d-337b-420c-bee1-f1ca7b1176ac", pid: 4242, cwd: "/repo/api", repoRoot: "/repo/api",
   title: "herdr working tree", fileCount: 3, snapshot: { state: { reviewNoteCount: 3, reviewNotes: [{ source: "user" }, { source: "user" }, { source: "agent" }] } } }];
@@ -1758,18 +2484,18 @@ await settle();
 assert(host.execs.some(e => e.command === "hunk" && e.args.join(" ") === "session list --json"));
 assert.deepEqual(host.shared.get("ram.hunk.sessions")?.map(x => [x.id.slice(0, 4), x.mine, x.agent]), [["9ff4", 2, 1]]);
 tree = R(hside, { role: "side" });
-const sessRow = withId(tree, "hunk-9ff4921d-337b-420c-bee1-f1ca7b1176ac");
-assert.deepEqual(words(sessRow), ["\u25c6", "diff", "api", "\u270e2", "9ff4"], "your 2 notes, and the id /hunk takes");
-assert.equal(op(sessRow, "tooltip")[0], "herdr working tree: 2 of your notes, 1 agent notes \u00b7 /hunk 9ff4 \u00b7 in api");
-assert.deepEqual(op(sessRow, "bg"), ["#ffb54714"], "the one on screen is lit");
+const sessRow = withId(tree, "hunk-tNEW");
+assert.deepEqual(words(sessRow), ["\u25c6", "diff", "\u270e3", "5m"], "its 3 notes (yours and the agent's)");
+assert.equal(op(sessRow, "tooltip")[0], "herdr working tree: 2 of your notes, 1 agent notes \u00b7 /hunk 9ff4", "and the id /hunk takes");
 host.calls = [];
-click(tree, "hunk-9ff4921d-337b-420c-bee1-f1ca7b1176ac");
-assert.deepEqual(host.calls, [{ name: "space.select", args: { id: "s0" } }, { name: "tab.select", args: { id: "tabNEW" } }]);
+click(tree, "hunk-tNEW");
+assert.deepEqual(host.calls, [{ name: "tab.select", args: { id: "tabNEW" } }], "a click shows it");
 // Its x (on hover) asks first: closing loses notes that weren't saved.
+assert.deepEqual(op(withId(tree, "hunkx-tNEW"), "text_color"), ["#00000000"], "the x hides until the pointer is on the line");
 sessRow.handlers.on_hover(true, cx);
 tree = R(hside, { role: "side" });
 host.overlays = [];
-click(tree, "hunkx-9ff4921d-337b-420c-bee1-f1ca7b1176ac");
+click(tree, "hunkx-tNEW");
 assert.deepEqual(host.overlays.at(-1).props, { title: "Close hunk diff?", detail: "Its 3 notes go with it, unless saved first (/hunk save).",
   command: { name: "tab.close", args: { id: "tabNEW", confirmed: true } } });
 // (hunk is asked again every 3 s while a review is open; here, at once.)
@@ -1778,34 +2504,73 @@ map.sessions.soon();
 host.timers.filter(tm => tm.ms === 1000).forEach(tm => tm.fn(cx)); await settle();
 assert.deepEqual(host.shared.get("ram.hunk.sessions").map(x => x.mine + x.agent), [0]);
 tree = R(hside, { role: "side" }); host.calls = [];
-click(tree, "hunkx-9ff4921d-337b-420c-bee1-f1ca7b1176ac");
+click(tree, "hunkx-tNEW");
 assert.deepEqual(host.calls, [{ name: "tab.close", args: { id: "tabNEW" } }], "no notes: it just closes");
+withId(tree, "hunk-tNEW").handlers.on_hover(false, cx);
 // In meta the main stick and the space's stick mark it as well (the review has no frame).
 host.shared.set("ram.zoom", "meta");
 assert(textOf(withId(AS(), "all-space-s0")).includes("\u25c61"));
 const hr = RR();
 assert(textOf(withId(hr, "head-s0")).includes("\u25c61") && !withId(hr, "frame-tabNEW"), "the stick: ◆1 by its name, no frame for the review");
 host.shared.set("ram.zoom", "space");
-// ^b r from the review goes back to your tab; from there, back to the review.
+// ^b r on the review: back where you came from (it stays open); from there, back to it.
 host.calls = [];
-click(withId(R(map, {}), "ram-levels"), "ram-level-hunk");
-assert.deepEqual(host.calls.at(-1), { name: "tab.select", args: { id: "tab0-0" } }, "hunk again goes back (the review stays open)");
+await send("hunk");
+assert.deepEqual(host.calls.at(-1), { name: "tab.select", args: { id: "tab0-0" } }, "^b r on a review goes back");
+assert.equal(host.shared.get("ram.came"), null);
 spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");
+R(map, {}); await settle();
 host.calls = [];
 await send("hunk");
 assert.deepEqual(host.calls.at(-1), { name: "tab.select", args: { id: "tabNEW" } }, "^b r: the space's last review");
 spaces[0].tabs.forEach(t => t.active = t.id === "tabNEW");
+R(map, {}); await settle();
+assert.deepEqual(host.shared.get("ram.came"), { level: "space", space: "s0", tab: "tab0-0", pane: null });
+// HUNK's header (^b r) does the same.
+host.calls = [];
+click(R(hside, { role: "side" }), "ram-hunk-head");
+assert.deepEqual(host.calls.at(-1), { name: "tab.select", args: { id: "tab0-0" } }, "HUNK's header, on the review: back");
+host.shared.set("ram.came", { level: "space", space: "s0", tab: "tab0-0", pane: null });
+// The peek strip, under a review: split, where you came from on the left (↩) and SP's
+// tab on the right. It reads both terminals every 1.5 s.
+host.shared.set("ram.sp", { space: "s1", tab: "tab1-0", pane: null });
 const peek = view({ role: "peek" });
 assert.equal(host.timers.at(-1).ms, 1500);
+host.hcs = [];
 host.timers.at(-1).fn(cx);
 await settle();
 tree = R(peek, { role: "peek" });
-assert.deepEqual(host.hcs.at(-1), ["read", "t1"], "the peek strip reads the work tab's terminal");
-assert(textOf(tree).includes("one") && textOf(tree).includes("two") && textOf(tree).includes("&1"), "its lines, without colors, under &1");
+assert.deepEqual(host.hcs, [["read", "t1"], ["read", "t6"]], "the tab you came from (its focused terminal) and SP's");
+assert.deepEqual(withId(tree, "ram-peek").kids.map(idOf), ["peek-came", "peek-sp"], "where you came from left, SP right");
+const came = textOf(withId(tree, "peek-came")), spBox = textOf(withId(tree, "peek-sp"));
+assert(came[0] === "\u21a9" && came.includes("api \u00b7 *1") && came.includes("one") && came.includes("two"), came.join("|"));
+assert(spBox[0] === "SP\u25b8" && spBox.includes("web \u00b7 *1") && spBox.includes("Claude \u00b7 Claude"), spBox.join("|"));
+assert.deepEqual(op(withId(tree, "peek-sp"), "border_color"), ["#ff5f6d"], "SP's agent needs you: its box is red");
+assert(op(withId(tree, "peek-came"), "tooltip")[0].startsWith("Back to api \u00b7 *1") && op(withId(tree, "peek-sp"), "tooltip")[0].includes("click: meta (^b m)"));
 host.calls = [];
-click(tree, "ram-peek");
-assert.deepEqual(host.calls.at(-1), { name: "tab.select", args: { id: "tab0-0" } });
-// hunk quits: its tab goes, and the window goes back to the work tab.
+click(tree, "peek-came");
+assert.deepEqual([host.calls.at(-1), host.shared.get("ram.came")], [{ name: "tab.select", args: { id: "tab0-0" } }, null], "↩: back there");
+host.shared.set("ram.came", { level: "space", space: "s0", tab: "tab0-0", pane: null });
+click(tree, "peek-sp");
+assert.equal(host.shared.get("ram.zoom"), "meta", "SP's box: meta, at SP");
+host.shared.set("ram.zoom", "space");
+// No box repeats a tab: SP where you came from is one box.
+host.shared.set("ram.sp", { space: "s0", tab: "tab0-0", pane: null });
+assert.deepEqual(withId(R(peek, { role: "peek" }), "ram-peek").kids.map(idOf), ["peek-came"], "SP's tab is where you came from: one box");
+// A review opened from meta (came is meta's place): only SP's box.
+host.shared.set("ram.came", { level: "meta", space: "s1", tab: "tab1-0", pane: null });
+host.shared.set("ram.sp", { space: "s1", tab: "tab1-0", pane: null });
+assert.deepEqual(withId(R(peek, { role: "peek" }), "ram-peek").kids.map(idOf), ["peek-sp"], "came from meta: SP's box only");
+host.shared.set("ram.came", { level: "space", space: "s0", tab: "tab0-0", pane: null });
+// P (shared ram.peek false) turns it off everywhere; the map copy hides its block.
+host.shared.set("ram.peek", false); host.calls = [];
+assert.equal(withId(R(peek, { role: "peek" }), "ram-peek").kids.length, 0, "P off: nothing");
+R(map, {}); await settle();
+assert.deepEqual(layoutCalls(), [{ name: "layout.hide", args: { id: "ram-peek" } }], "and its block hides");
+host.shared.delete("ram.peek"); host.calls = [];
+R(map, {}); await settle();
+assert.deepEqual(layoutCalls(), [{ name: "layout.show", args: { id: "ram-peek" } }], "P on: back");
+// hunk quits: its tab goes, and the window goes back to the tab you came from.
 spaces[0].tabs.splice(spaces[0].tabs.findIndex(t => t.id === "tabNEW"), 1);
 panes.splice(panes.findIndex(p => p.pane === "pNEW"), 1);
 agentList.splice(agentList.findIndex(a => a.address === "tNEW"), 1);
@@ -1862,19 +2627,342 @@ spaces[0].tabs.push({ id: "tabLG", name: "lazygit", named: true, index: 3, activ
 panes.push({ pane: "pLG", terminal: "tLG", tab: "tabLG", title: "lazygit", status: null, focused: true, program: { name: "lazygit" } });
 raw.push({ address: "tLG", state: "live", created_ms: 9500, labels: { "ram.lazygit": "1" } });
 spaces[0].tabs.forEach(t => t.active = t.id === "tabLG");
-assert.equal(level(), "space", "lazygit isn't the hunk level");
 R(map, {}); await settle();
 tree = R(side, { role: "side" });
 assert.deepEqual(textOf(withId(R(map, {}), "tabchip-tabLG")).filter(x => x === "lazygit"), ["lazygit"]);
 assert.deepEqual(op(withId(tree, "ram-git"), "border_color"), ["#ffb547"], "GIT is lit while lazygit shows");
-assert.equal(host.shared.get("ram.from").s0, "tab0-0", "lazygit's tab isn't remembered as the work tab");
+assert.equal(host.shared.get("ram.bp").s0, "tab0-0", "lazygit's tab isn't a BP");
 spaces[0].tabs.splice(spaces[0].tabs.findIndex(t => t.id === "tabLG"), 1);
 panes.splice(panes.findIndex(p => p.pane === "pLG"), 1);
 spaces[0].tabs.forEach(t => t.active = t.id === "tab0-1");
 host.calls = [];
 R(map, {}); await settle();
 assert(host.calls.some(c => c.name === "tab.select" && c.args.id === "tab0-0"), "back to the tab before lazygit");
-console.log("PASS: hunk: menu, reviews in their own tabs (out of the strip, ◆n on the space), HUNK list with notes and ids, sessions matched to tabs; peek strip; quitting returns");
+console.log("PASS: hunk: menu, reviews in their own tabs (out of the strip, ◆n on the space), HUNK under GIT with this space's reviews (notes, age, a hover x), sessions matched to tabs; the peek strip (split under a review, P turns it off); quitting returns");
+
+// ---- The peek strip's height: up to the line over .rodata --------------------------------------
+{
+  host.shared.set("ram.zoom", "space");
+  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");
+  const ph = view({ role: "side" });
+  ph.gitInfo.git[K("/repo/api")] = side.gitInfo.git[K("/repo/api")];
+  const parts = (t, height) => {
+    const details = withId(t, "ram-side-details"), keysNode = flatten(t).find(n => n.kids.some(k => idOf(k) === "ram-settings"));
+    return { details: op(details, "h")?.[0] ?? heightOf(details), keys: heightOf(keysNode), height };
+  };
+  // (At 270 px with a machine and a dirty repo, .rodata..LANG scroll in what's left.)
+  for (const [height, machines] of [[900, []], [900, [{ name: "remote", state: "connected" }]], [270, [{ name: "remote", state: "connected" }]]]) {
+    ph.machines = machines;
+    ph.size = { width: 340, height };
+    host.shared.delete("ram.peek.h");
+    const t = R(ph, { role: "side" }); await settle();
+    const p2 = parts(t, height), want = Math.round(p2.details + p2.keys + 1);
+    assert.equal(host.shared.get("ram.peek.h"), want, `${height} px, ${machines.length} machine(s): .rodata, GIT, HUNK, LANG, the keys and the border`);
+    // The column from its top: its border, STACK..HEAP, then the line over .rodata, at
+    // the height the peek strip's top is at (the row's bottom minus the strip).
+    assert(Math.abs((height - p2.details - p2.keys - 1) - (height - want)) < 1, "its top on that line");
+    if (height === 270) assert(op(withId(t, "ram-side-details"), "overflow_y_scrollbar"), "(scrolling: the part as drawn)");
+  }
+  ph.machines = [];
+  ph.size = { width: 340, height: 900 };
+  R(ph, { role: "side" }); await settle();
+  const want = host.shared.get("ram.peek.h");
+  // The strip's copy gives the peek block that height when it shows (SP's tab is web *1).
+  host.shared.set("ram.sp", { space: "s1", tab: "tab1-0", pane: null });
+  const pk2 = view({});
+  host.calls = [];
+  R(pk2, {}); await settle();
+  const peekCalls = () => layoutCalls().filter(c => c.args.id === "ram-peek");
+  assert.deepEqual(peekCalls(), [{ name: "layout.resize", args: { id: "ram-peek", px: want } }, { name: "layout.show", args: { id: "ram-peek" } }]);
+  host.calls = [];
+  R(pk2, {}); await settle();
+  assert.deepEqual(peekCalls(), [], "once");
+  host.shared.set("ram.peek.h", want + 40);
+  R(pk2, {}); await settle();
+  assert.deepEqual(peekCalls(), [{ name: "layout.resize", args: { id: "ram-peek", px: want + 40 } }], "a new height: resized");
+  host.calls = [];
+  host.shared.set("ram.peek.h", "tall");
+  R(pk2, {}); await settle();
+  assert.deepEqual(peekCalls(), [{ name: "layout.resize", args: { id: "ram-peek", px: 180 } }], "nothing usable: the layout's 180");
+  ph.sharePeekHeight(12, cx);
+  assert.equal(host.shared.get("ram.peek.h"), 56, "never under its header and a line");
+  host.shared.delete("ram.peek.h"); host.shared.set("ram.sp", { space: "s0", tab: "tab0-0", pane: null });
+}
+// Its boxes show as many of their last lines as fit that height (not a fixed 8).
+{
+  host.shared.set("ram.zoom", "space");
+  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");
+  host.shared.set("ram.sp", { space: "s1", tab: "tab1-0", pane: null });
+  host.readOut = Array.from({ length: 40 }, (_, k) => `line ${k + 1}`).join("\n") + "\n";
+  const pv = view({ role: "peek" });
+  host.timers.at(-1).fn(cx); await settle();
+  const shownLines = height => {
+    pv.size = { width: 900, height };
+    return textOf(withId(R(pv, { role: "peek" }), "peek-sp")).filter(x => /^line \d+$/.test(x));
+  };
+  const fitRows = height => Math.floor((height - 2 - 24 * 1.25 - 8 * 1.25) / (13 * 1.25));
+  for (const height of [120, 300, 520]) {
+    const got = shownLines(height);
+    assert.equal(got.length, fitRows(height), `${height} px: ${fitRows(height)} lines`);
+    assert.equal(got.at(-1), "line 40", `${height} px: the last ones`);
+  }
+  assert(shownLines(520).length > 8, "a tall strip shows more than 8");
+  assert.deepEqual(shownLines(56), ["line 40"], "the shortest: one line");
+  // The box's lines, its header and padding fit inside it.
+  pv.size = { width: 900, height: 300 };
+  const box = withId(R(pv, { role: "peek" }), "peek-sp");
+  assert(heightOf(box) <= 300 + 1e-9, `the box needs ${heightOf(box)} of 300`);
+  // Its size comes from the block it's drawn in.
+  withId(R(pv, { role: "peek" }), "ram-peek").handlers.on_size_change({ width: 900, height: 400 }, cx);
+  assert.deepEqual(pv.size, { width: 900, height: 400 });
+  host.readOut = null;
+  host.shared.set("ram.sp", { space: "s0", tab: "tab0-0", pane: null });
+}
+console.log("PASS: the peek strip is as tall as the side column from the line over .rodata down, so its top lines up with that line, and shows as many lines as fit");
+
+// ---- The keyboard in the side column (^b h; RAM's mod.json is "focusable") ---------------------
+{
+  assert.deepEqual(JSON.parse(await read("mods/ram/mod.json")), { place: "none", focusable: true }, "pane.go can give RAM's copies the keyboard");
+  host.shared.set("ram.zoom", "space");
+  show("s0", "tab0-0");
+  // A review in api, for HUNK's line.
+  spaces[0].tabs.push({ id: "tabK", name: "hunk diff", named: true, index: 3, active: false, settled: false, status: null });
+  panes.push({ pane: "pK", terminal: "tK", tab: "tabK", title: "hunk", status: null, focused: false, cwd: "/repo/api", program: { name: "hunk" } });
+  raw.push({ address: "tK", state: "live", created_ms: Date.now() - 120000, labels: { "ram.hunk": "diff" } });
+  const ks = view({ role: "side" });
+  let kNext = host.waiting.at(-1);  // its nextCommand()
+  const take = async c => { const w = kNext, before = host.waiting.length; w(c); await settle(); kNext = host.waiting.slice(before).at(-1); };
+  ks.size = { width: 340, height: 900 };
+  ks.gitInfo.git[K("/repo/api")] = side.gitInfo.git[K("/repo/api")];
+  const KS = () => R(ks, { role: "side" });
+  // The part with the keyboard has a cyan outline: an absolute child with a cyan border.
+  const outlined = t => flatten(t).filter(n => n.kids.some(k => typeof k === "object" && k && op(k, "absolute") && op(k, "border")?.[0] === 1
+    && op(k, "border_color")?.[0] === "#6fe3d3" && op(k, "top")?.[0] === 0)).map(idOf);
+  const press = k => { host.stopped = false; withId(KS(), "ram-side").handlers.on_key_down({ key: k }, cx); };
+  const to = id => {
+    for (let i = 0; i < 80 && outlined(KS())[0] !== id; i++) press("down");
+    assert.deepEqual(outlined(KS()), [id], `the keyboard reaches ${id}`);
+  };
+  let kt = KS();
+  assert(!withId(kt, "ram-kb-keys") && withId(kt, "ram-settings") && !outlined(kt).length, "without the keyboard: the keys row, nothing outlined");
+  await take("focus");
+  assert(ks.handle.is_focused(), "\"focus\" (pane.go into the column): it takes the keyboard");
+  kt = KS();
+  assert.deepEqual(outlined(kt), ["ram-rg"], "its first part is outlined: rg-fzf's button");
+  assert.deepEqual(textOf(withId(kt, "ram-kb-keys")), ["\u2191\u2193", "move", "\u23ce", "rg-fzf", "esc", "back"], "the bottom row: its keys");
+  assert(!withId(kt, "ram-settings"), "instead of Settings, Keys and Commands");
+  press("down");
+  assert.deepEqual(outlined(KS()), ["ram-space-new"], "down: the next");
+  assert(host.stopped, "the column keeps the key");
+  press("j");
+  assert.deepEqual(outlined(KS()), ["stack-s0"], "j too");
+  assert.deepEqual(textOf(withId(KS(), "ram-kb-keys")), ["\u2191\u2193", "move", "\u23ce", "show", "r", "rename", "esc", "back"]);
+  host.calls = [];
+  press("enter");
+  assert.deepEqual(host.calls, [{ name: "tab.select", args: { id: "tab0-0" } }], "Enter: what a click does (api at its BP)");
+  press("r");
+  assert.deepEqual(host.calls.at(-1), { name: "space.rename", args: { id: "s0" } }, "r renames");
+  press("k"); press("up"); press("up");
+  assert.deepEqual(outlined(KS()), ["ram-rg"], "k and up go back, and stop at the first");
+  to("heap-t2");
+  host.calls = [];
+  press("enter");
+  assert.deepEqual(host.calls, [{ name: "agent.focus", args: { terminal: "t2" } }], "a heap row: that agent");
+  to("ram-git");
+  host.execs = [];
+  press("enter"); await settle();
+  assert.equal(host.execs.at(-1)?.args[5], "lazygit api", "GIT: lazygit");
+  to("ram-hunk-new");
+  host.overlays = [];
+  press("enter");
+  assert.equal(host.overlays.at(-1)?.props?.role, "hunk-menu", "HUNK's +: the menu");
+  to("hunk-tK");
+  assert.deepEqual(textOf(withId(KS(), "ram-kb-keys")), ["\u2191\u2193", "move", "\u23ce", "show", "x", "close", "esc", "back"]);
+  host.calls = [];
+  press("x");
+  assert.deepEqual(host.calls, [{ name: "tab.close", args: { id: "tabK" } }], "x: what its \u2715 does");
+  to("ram-lang-ext");
+  host.overlays = [];
+  press("enter");
+  assert.equal(host.overlays.at(-1)?.props?.mode, "ext", "LANG's ext: the picker");
+  for (let i = 0; i < 20; i++) press("down");
+  const last = outlined(KS())[0];
+  press("down");
+  assert.deepEqual(outlined(KS()), [last], "down stops at the last");
+  host.stopped = false;
+  press("q");
+  assert(!host.stopped, "other keys aren't the column's");
+  // Esc: the keyboard back to the terminal (to the right).
+  host.calls = [];
+  press("escape");
+  assert.deepEqual(host.calls, [{ name: "pane.go", args: { direction: "right" } }], "Esc: back to the terminal");
+  kt = KS();
+  assert(withId(kt, "ram-settings") && !outlined(kt).length, "the keys row again");
+  // A click elsewhere takes the keyboard away: the outline goes too.
+  await take("focus");
+  assert(outlined(KS()).length === 1);
+  host.keyboard = null; ks.kb.since -= 1000;
+  assert(!outlined(KS()).length && withId(KS(), "ram-settings"), "the keyboard went elsewhere: back to normal");
+  // In meta the main stick's rows: Enter shows, ← → fold a space.
+  host.shared.set("ram.zoom", "meta");
+  ks.gitInfo.git[K("/repo/web")] = webGit;
+  ks.all.setMode("memory");
+  await take("focus");
+  to("all-space-s0");
+  assert(textOf(withId(KS(), "ram-kb-keys")).includes("fold"), "a space with files can fold");
+  press("left");
+  assert(!withId(KS(), "all-file-s0:src/app.ts"), "\u2190 folds it");
+  press("left");
+  assert(!withId(KS(), "all-file-s0:src/app.ts"), "and again stays folded");
+  press("right");
+  assert(withId(KS(), "all-file-s0:src/app.ts"), "\u2192 unfolds it");
+  host.scrolls = [];
+  press("down");
+  assert.deepEqual(outlined(KS()), ["all-file-s0:src/app.ts"], "its files come next");
+  assert.deepEqual(host.scrolls, [0], "the tree scrolls to the row the keyboard is on (its space's group)");
+  host.scrolls = [];
+  to("all-space-s1");
+  assert.equal(host.scrolls.at(-1), 1, "web's group");
+  host.calls = [];
+  press("enter");
+  assert.deepEqual(host.calls, [{ name: "tab.select", args: { id: "tab1-0" } }], "Enter: web at its BP (SP goes there)");
+  press("escape");
+  host.shared.set("ram.zoom", "space");
+  spaces[0].tabs.pop(); panes.pop(); raw.pop();
+  // The strip, the sticks and the peek strip hand the keyboard straight back.
+  host.calls = [];
+  await send("focus");
+  assert.deepEqual(host.calls, [{ name: "pane.go", args: { direction: "down" } }], "the strip: back down to the terminal");
+  for (const role of ["rams", "peek"]) {
+    const v2 = view({ role }), w2 = host.waiting.at(-1);
+    host.calls = [];
+    w2("focus"); await settle();
+    assert.deepEqual(host.calls, [{ name: "pane.go", args: { direction: "up" } }], `${role}: back up to the terminal`);
+    assert(v2);
+  }
+}
+console.log("PASS: keyboard: \"focus\" gives the side column the keyboard (^b h); \u2191\u2193 j k move an outline over every part a click reaches, Enter clicks, x closes, r renames, \u2190 \u2192 fold, Esc goes back; the bottom row says the keys; the other copies hand it back");
+
+// ---- LANG's dialog by keyboard --------------------------------------------------------------
+{
+  host.lsTree = ["100644 blob a     1200\tsrc/main.rs", "100644 blob b      300\tsrc/lib.rs", "100755 blob c       90\tbuild.sh", ""].join("\0");
+  const lp = { role: "lang", space: "s0", top: "/repo/api", machine: null, repo: "herdr", mode: "list", lang: null, overlay: "oK" };
+  const lv = view(lp);
+  assert(lv.langView.handle.is_focused(), "the dialog takes the keyboard");
+  const LV = () => R(lv, lp);
+  const lkey = k => { host.stopped = false; withId(LV(), "lang-view").handlers.on_key_down({ key: k }, cx); };
+  lkey("down");
+  assert.equal(lv.langView.at, 0, "nothing read yet: nothing to move to");
+  await settle();
+  const lit = t => flatten(t).filter(n => /^lang-(row|file|ext)-\d+$/.test(idOf(n) ?? "") && op(n, "bg")?.[0] === "#ffb5471f").map(idOf);
+  assert.deepEqual(lit(LV()), ["lang-row-0"], "the first language is chosen");
+  lkey("down");
+  assert.deepEqual(lit(LV()), ["lang-row-1"], "down: the next");
+  assert(host.stopped);
+  lkey("up"); lkey("up");
+  assert.deepEqual(lit(LV()), ["lang-row-0"], "up stops at the first");
+  lkey("down"); lkey("enter");
+  assert.deepEqual([lv.langView.mode, lv.langView.lang, lit(LV())], ["files", "Shell", ["lang-file-0"]], "Enter: its files");
+  host.calls = []; host.closed = [];
+  lkey("enter");
+  assert.deepEqual(host.calls.at(-1), { name: "tab.new", args: { space: "s0", folder: "/repo/api", name: "build.sh",
+    argv: ["exec", "sh", "-c", 'exec "${EDITOR:-vi}" "$1"', "sh", "build.sh"] } }, "Enter on a file: $EDITOR");
+  assert.deepEqual(host.closed, ["oK"]);
+  lkey("left");
+  assert.deepEqual([lv.langView.mode, lit(LV())], ["list", ["lang-row-0"]], "\u2190: every language again");
+  lkey("down"); lkey("enter"); lkey("backspace");
+  assert.equal(lv.langView.mode, "list", "Backspace too");
+  host.closed = [];
+  lkey("escape");
+  assert.deepEqual(host.closed, ["oK"], "Esc closes it");
+  host.lsTree = null; host.props = {};
+}
+console.log("PASS: LANG's dialog: \u2191\u2193 choose, Enter does what a click does, \u2190 or Backspace go back, Esc closes");
+
+// ---- RAM's right-click menu (the layout's terminal_menu) -------------------------------------
+{
+  assert.equal(layout.terminal_menu, "ram-menu", "a terminal's right-click opens RAM's menu");
+  assert.deepEqual(JSON.parse(await read("mods/ram-menu/mod.json")), { place: "none", overlay: { width: 250, height: 300 } });
+  for (const icon of ["copy", "paste"]) {
+    const art = await read(`mods/ram-menu/${icon}.svg`);
+    assert(/viewBox="0 0 24 24"/.test(art) && /stroke="currentColor"/.test(art) && /fill="none"/.test(art), `${icon}.svg: 24 units, tinted`);
+  }
+  const rm = await import(await load("mods/ram-menu/main.js"));
+  const term = keysFile.terminal ?? {};
+  const keyOf = action => term["cmd-c"] === action ? "\u2318C" : term["cmd-v"] === action ? "\u2318V" : "";
+  const mp = { tab: "pane", target: { pane: "p0", terminal: "t1" }, overlay: "oR" };
+  host.props = mp;
+  const mv = new rm.default(); mv.init({}, cx);
+  assert(mv.handle.is_focused(), "it takes the keyboard");
+  const rows = () => flatten(mv.render(cx)).filter(n => /^ram-mi-\d+$/.test(idOf(n) ?? ""));
+  const words2 = n => textOf(n).filter(x => !x.endsWith(".svg"));
+  assert.deepEqual(rows().map(words2), [["Copy", keyOf("terminal.copy")], ["Paste", keyOf("terminal.paste")], ["Split right", "^b v"],
+    ["Split down", "^b -"], ["Zoom", "^b z"], ["Send right-clicks to pane", ""], ["Close pane", "^b x"]], "Copy and Paste, then Herdr's items, each with its key");
+  assert.deepEqual(op(rows()[0], "bg"), [host.colors.selected], "the first is chosen");
+  // Copy and Paste focus the terminal right-clicked first (they act on the focused one),
+  // then the menu closes (closing hands the keyboard to the focused pane).
+  host.calls = []; host.closed = []; host.events = [];
+  click(mv.render(cx), "ram-mi-0");
+  assert.deepEqual(host.calls, [{ name: "pane.focus", args: { pane: "p0" } }, { name: "terminal.copy", args: {} }]);
+  assert.deepEqual(host.events, ["run pane.focus", "run terminal.copy", "close oR"], "in that order: the menu closes last");
+  host.calls = []; host.closed = [];
+  click(mv.render(cx), "ram-mi-1");
+  assert.deepEqual(host.calls, [{ name: "pane.focus", args: { pane: "p0" } }, { name: "terminal.paste", args: {} }]);
+  host.calls = [];
+  click(mv.render(cx), "ram-mi-2");
+  assert.deepEqual(host.calls, [{ name: "pane.split", args: { direction: "right", pane: "p0" } }], "the others act on that pane");
+  // The keyboard: down/up (or j, k) round the ends, Enter runs, Esc closes.
+  const mkey = k => { host.stopped = false; withId(mv.render(cx), "ram-menu").handlers.on_key_down({ key: k }, cx); };
+  mkey("up");
+  assert.deepEqual(op(rows().at(-1), "bg"), [host.colors.selected], "up from the first: the last");
+  mkey("j"); mkey("j");
+  host.calls = []; host.closed = [];
+  mkey("enter");
+  assert.deepEqual([host.calls, host.closed], [[{ name: "pane.focus", args: { pane: "p0" } }, { name: "terminal.paste", args: {} }], ["oR"]], "Enter on Paste");
+  host.closed = [];
+  mkey("escape");
+  assert.deepEqual(host.closed, ["oR"]);
+  // A sub-agent can go back under its parent; one that sends right-clicks to its program says so.
+  raw.push({ address: "kid", parent: "t1", state: "live", labels: { "herdr.right-click": "program" } });
+  host.props = { tab: "pane", target: { pane: "p0", terminal: "kid" }, overlay: "oR" };
+  const labels2 = rows().map(n => words2(n)[0]);
+  assert(labels2.includes("Use Herdr right-click menu") && labels2.includes("Send back to t1"), labels2.join("|"));
+  raw.pop();
+  // A terminal outside a tab (a layout terminal block): no pane to split, zoom or close.
+  host.props = { tab: "pane", target: { pane: "block-x", terminal: "t1" }, overlay: "oR" };
+  assert.deepEqual(rows().map(n => words2(n)[0]), ["Copy", "Paste", "Send right-clicks to pane"]);
+  host.calls = [];
+  click(mv.render(cx), "ram-mi-0");
+  assert.deepEqual(host.calls[0], { name: "pane.focus", args: { terminal: "t1" } }, "it's focused by its terminal");
+  // How it writes keys.
+  assert.deepEqual(["cmd-c", "ctrl-shift-c", "ctrl-b", "alt-x", "cmd-shift-k"].map(rm.pretty), ["\u2318C", "^\u21e7C", "^b", "\u2325X", "\u2318\u21e7K"]);
+  host.platform = "linux";
+  const linuxKeys = host.keys;
+  host.keys = [{ section: "terminal", keys: "ctrl-insert", action: "terminal.copy" }, { section: "terminal", keys: "ctrl-shift-c", action: "terminal.copy" }];
+  assert.equal(rm.hint("terminal.copy"), "^\u21e7C", "elsewhere: the one with a letter");
+  host.platform = "macos";
+  host.keys = [{ section: "terminal", keys: "alt-c", action: "terminal.copy" }, { section: "terminal", keys: "cmd-c", action: "terminal.copy" }];
+  assert.equal(rm.hint("terminal.copy"), "\u2318C", "on a Mac: the cmd key");
+  host.keys = linuxKeys;
+  host.props = {};
+}
+console.log("PASS: RAM's right-click menu: Copy and Paste (on the terminal right-clicked, then it closes), then Herdr's items with their keys; the keyboard works it");
+
+// ---- Every click has a key: the new ones are bound -------------------------------------------
+{
+  const bar = keysFile[`mod:${BAR}`];
+  const want = { "shift-c": "newmenu", "<": "tab.left", "shift-,": "tab.left", ">": "tab.right", "shift-.": "tab.right",
+    "{": "space.earlier", "shift-[": "space.earlier", "}": "space.later", "shift-]": "space.later",
+    e: "ram.enter", "shift-i": "ram.bp", "shift-p": "ram.peek", m: "ram.meta", i: "ram.space", r: "ram.hunk", f: "ram.follow",
+    g: "lazygit", "/": "rg", d: "ram.changes", b: "layout.toggle:sidebar", w: "navigate", h: "pane.go:left" };
+  for (const [k, action] of Object.entries(want)) assert.equal(bar[k], `${BAR}.${action}`, `^b ${k}`);
+  // Keys show where their buttons are: the levels, e and f, HUNK, GIT, rg-fzf, STACK's row.
+  host.shared.set("ram.zoom", "space");
+  const t5 = R(side, { role: "side" });
+  assert(textOf(withId(t5, "ram-git-line")).includes("^b g") && textOf(withId(t5, "ram-hunk-head")).includes("^b r")
+    && textOf(withId(t5, "ram-rg")).includes("/") && textOf(t5).includes("^b w"), "GIT ^b g, HUNK ^b r, rg-fzf /, STACK ^b w");
+}
+console.log("PASS: keys: C, < >, { }, e, I and P are bound after ^b, with the rest; the side column shows its keys by their parts");
 
 // ---- Inactive window, empty state, text ---------------------------------------------------
 spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");
@@ -1893,7 +2981,7 @@ assert(motions(RR()).length > 0, "active again: the scan line sweeps the sticks"
 host.shared.set("ram.zoom", "space");
 Object.assign(host, { spaces: [], panes: [], agents: [], raw: [], calls: [] });
 host.storage.clear();  // no exit history: nothing retained from closed spaces
-for (const role of [{}, { role: "side" }, { role: "peek" }, { role: "rams" }, { role: "lang" }]) {
+for (const role of [{}, { role: "side" }, { role: "peek" }, { role: "rams" }, { role: "lang" }, { role: "git-init" }]) {
   const v = view(role);
   assert(v.render(cx), JSON.stringify(role));
 }
@@ -1904,7 +2992,9 @@ assert(textOf(view({ role: "rams" }).render(cx)).includes("No regions yet: open 
 assert(textOf(view({ role: "side" }).render(cx)).includes("STACK \u2193  0"), "meta's main stick with nothing open");
 await settle();
 assert(!host.calls.some(c => !c.name.startsWith("layout.")), "an empty window runs nothing but sizes");
-for (const file of ["mods/ram/main.js", "mods/ram/ui.js", "mods/ram/all.js", "mods/ram/hunk.js", "mods/ram/model.js", "mods/ram/git.js", "mods/ram/langs.js", "mods/ram/mod.json", "layouts/ram.json", "layouts/ram.svg", "themes/ram.json", `mods/${BAR}/main.js`]) {
+for (const file of ["mods/ram/main.js", "mods/ram/ui.js", "mods/ram/all.js", "mods/ram/hunk.js", "mods/ram/model.js", "mods/ram/git.js", "mods/ram/langs.js",
+  "mods/ram/pointers.js", "mods/ram/procs.js", "mods/ram/gitinit.js", "mods/ram/mod.json", "mods/ram-menu/main.js", "mods/ram-menu/mod.json", "mods/ram-menu/copy.svg", "mods/ram-menu/paste.svg",
+  "layouts/ram.json", "layouts/ram.svg", "themes/ram.json", `mods/${BAR}/main.js`]) {
   const content = await read(file);
   assert(!/\/(?:Users|home)\/[^/\s]+/.test(content), `private home path in ${file}`);
   assert(!/[\u2013\u2014]/u.test(content), `en/em dash in ${file}`);
@@ -2005,16 +3095,24 @@ host.props = { overlay: "o1" };
 host.shared.set("layout", "ram");
 const bar = new Prefix(); bar.init({}, cx2);
 let barText = textOf(bar.render(cx2));
-assert(barText.includes("levels") && barText.includes("meta") && barText.includes("hunk") && barText.includes("r") && !barText.includes("rift"), barText);
+assert(barText.includes("RAM") && barText.includes("meta") && barText.includes("hunk") && barText.includes("r") && !barText.includes("rift"), barText);
 assert(barText.includes("follow") && barText.includes("f") && barText.includes("diff") && barText.includes("d"), "f follow, d diff");
+{
+  // Each key right before what it does (the bar writes shift-i as I).
+  const pair = (k, label) => barText.some((x, i) => x === k && barText[i + 1] === label);
+  for (const [k, label] of [["e", "enter"], ["I", "BP here"], ["P", "peek"], ["C", "new\u2026"], ["<", "move \u2190"], [">", "move \u2192"],
+    ["{", "move \u2191"], ["}", "move \u2193"], ["m", "meta"], ["i", "space"], ["r", "hunk"]])
+    assert(pair(k, label), `${k} ${label}`);
+}
 assert(!barText.includes("changes"), "the bar says diff, as the main stick does");
 assert(barText.includes("^b") && !barText.some(x => /ctrl-b/.test(x)), `the bar writes the prefix as ^b: ${barText}`);
 assert(barText.includes("send ^b"), "even the passthrough");
 assert(barText.includes("git") && barText.includes("g") && barText.includes("lazygit"), "git: g lazygit");
-assert(barText.indexOf("git") < barText.indexOf("levels"), "git before levels");
+assert(barText.indexOf("git") < barText.indexOf("RAM"), "git before RAM's own keys");
 host.shared.set("layout", "traveler");
 barText = textOf(bar.render(cx2));
-assert(!barText.includes("levels") && !barText.includes("meta"), barText);
+assert(!barText.includes("RAM") && !barText.includes("meta") && !barText.includes("BP here"), barText);
+assert(barText.includes("new\u2026") && barText.includes("move \u2190"), "C, < > and { } work in every layout");
 assert(barText.includes("git") && barText.includes("lazygit"), "g lazygit shows in every layout");
 assert(barText.includes("^b") && !barText.some(x => /ctrl-b/.test(x)), "every layout's bar says ^b");
 // ^b g outside RAM: lazygit in a new tab at the focused terminal's repo, labelled
@@ -2026,18 +3124,38 @@ host.calls = []; host.notes = []; host.closed = [];
 const bar2 = new prefixMod.default(); host.props = { overlay: "o9" }; bar2.init({}, cx2);
 bar2.finish("lazygit", cx2);
 await settle();
-assert.deepEqual(host.calls.at(-1), { name: "tab.new", args: { space: "s0", name: "lazygit", folder: "/repo/api",
-  argv: ["exec", "sh", "-c", 'hc label "$HC_TERMINAL_ID" ram.lazygit=1 >/dev/null 2>&1; exec lazygit'] } });
+const lazyArgv = ["exec", "sh", "-c", 'hc label "$HC_TERMINAL_ID" "ram.lazygit=$PWD" >/dev/null 2>&1; exec lazygit'];
+assert.deepEqual(host.calls.at(-1), { name: "tab.new", args: { space: "s0", name: "lazygit api", folder: "/repo/api", argv: lazyArgv } },
+  "named after the repo; it labels itself with its folder");
 assert.deepEqual(host.closed, ["o9"], "then the bar closes");
+assert.deepEqual(prefixMod.LAZY_ARGV, lazyArgv);
 host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", cwd: "/home/tester/notes" };
+host.calls = []; host.notes = []; host.overlays = [];
+await prefixMod.lazygitHere();
+assert.deepEqual([host.calls.length, host.overlays.at(-1)], [0, { mod: "ram", kind: "dialog", width: 520, height: 340,
+  props: { role: "git-init", space: "s0", name: "api", folder: "/home/tester/notes", machine: null } }],
+  "not a repo: RAM's GIT dialog, in any layout");
+assert.equal(host.notes.length, 0);
+// git can't be asked (a machine that's away): lazygit there, which asks itself.
+host.execHook = command => { if (command === "git") throw new Error("unreachable"); };
+host.overlays = [];
+await prefixMod.lazygitHere();
+assert.deepEqual([host.overlays.length, host.calls.at(-1)?.args?.folder], [0, "/home/tester/notes"]);
+host.execHook = null; host.calls = [];
+host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", cwd: "" };
+spaces[0].folder = ""; host.calls = [];
+await prefixMod.lazygitHere();
+assert.deepEqual([host.calls.length, host.notes.at(-1)?.title], [0, "Nowhere for lazygit"], "no folder at all: nowhere");
+spaces[0].folder = "/repo/api";
+host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", cwd: "/repo/api" };
+raw.push({ address: "tLZ", state: "live", created_ms: 9900, labels: { "ram.lazygit": "/repo/api" } });
+panes.push({ pane: "pLZ", terminal: "tLZ", tab: "tab0-1", title: "lazygit", status: null, focused: false, program: { name: "lazygit" } });
 host.calls = [];
 await prefixMod.lazygitHere();
-assert.equal(host.calls.length, 0, "not a repo: nothing opens");
-assert.deepEqual([host.notes.at(-1).title, host.notes.at(-1).body], ["Not a git repo", "~/notes isn't in a git repository, so lazygit has nothing to open."]);
-raw.push({ address: "tLZ", state: "live", created_ms: 9900, labels: { "ram.lazygit": "1" } });
-panes.push({ pane: "pLZ", terminal: "tLZ", tab: "tab0-1", title: "lazygit", status: null, focused: false, program: { name: "lazygit" } });
+assert.deepEqual(host.calls.at(-1), { name: "tab.select", args: { id: "tab0-1" } }, "one already open for this repo: show it");
+raw.at(-1).labels = { "ram.lazygit": "/repo/web" };
 await prefixMod.lazygitHere();
-assert.deepEqual(host.calls.at(-1), { name: "tab.select", args: { id: "tab0-1" } }, "one already open in the space: show it");
+assert.equal(host.calls.at(-1).name, "tab.new", "the open one is another repo's: a new one");
 raw.pop(); panes.pop();
 host.shared.set("layout", "ram"); host.calls = [];
 const bar3 = new prefixMod.default(); bar3.init({}, cx2);
@@ -2052,7 +3170,7 @@ host.calls = []; host.closed = [];
 const bar6 = new prefixMod.default(); host.props = { overlay: "o11" }; bar6.init({}, cx2);
 bar6.finish("rg", cx2);
 await settle();
-assert.deepEqual(host.calls.at(-1), { name: "tab.new", args: { space: "s0", name: "rg-fzf", folder: "/repo/api",
+assert.deepEqual(host.calls.at(-1), { name: "tab.new", args: { space: "s0", name: "rg-fzf api", folder: "/repo/api",
   argv: ["exec", "sh", "-c", RG_TAB] } });
 assert.deepEqual(host.closed, ["o11"], "then the bar closes");
 host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", cwd: "/repo/api/src" };
@@ -2062,7 +3180,7 @@ assert.equal(host.calls.at(-1)?.args.folder, "/repo/api", "in a repo's subfolder
 host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", cwd: "/home/tester/notes" };
 host.calls = [];
 await prefixMod.rgHere();
-assert.equal(host.calls.at(-1)?.args.folder, "/home/tester/notes", "not a repo: that folder");
+assert.deepEqual([host.calls.at(-1)?.args.folder, host.calls.at(-1)?.args.name], ["/home/tester/notes", "rg-fzf notes"], "not a repo: that folder");
 // The key's other way in (finish without a task context: runCommand) does the same.
 host.calls = [];
 const bar8 = new prefixMod.default(); bar8.init({}, cx2);
@@ -2074,8 +3192,45 @@ bar7.finish("rg", cx2);
 assert.deepEqual(host.calls.at(-1), { name: "ram.rg", args: {} }, "in RAM, RAM opens it");
 barText = textOf(bar.render(cx2));
 assert(barText.includes("search") && barText.includes("/") && barText.includes("rg-fzf"), "search: / rg-fzf");
+// The bar's own commands: ^b < > move the tab, ^b { } the space, ^b C the new-tab menu;
+// in RAM ^b ( ) show a space at its BP, as clicking it does.
+{
+  const runBar = c => { host.calls = []; host.overlays = []; const b = new prefixMod.default(); b.init({}, cx2); b.finish(c); };
+  host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1" };
+  host.shared.set("layout", "traveler");
+  runBar("tab.left");
+  assert.deepEqual(host.calls, [], "the first tab can't go further left");
+  runBar("tab.right");
+  assert.deepEqual(host.calls, [{ name: "tab.move", args: { id: "tab0-0", index: 2 } }], "^b >: one place right");
+  host.focused = { space: "s0", tab: "tab0-1", pane: "p1", terminal: "t2" };
+  runBar("tab.left");
+  assert.deepEqual(host.calls, [{ name: "tab.move", args: { id: "tab0-1", index: 1 } }], "^b <: one place left");
+  runBar("tab.right");
+  assert.deepEqual(host.calls, [], "the last can't go right");
+  host.focused = { space: "s1", tab: "tab1-0", pane: "p5", terminal: "t6" };
+  runBar("space.earlier");
+  assert.deepEqual(host.calls, [{ name: "space.move", args: { id: "s1", index: 1 } }], "^b {: one place up");
+  runBar("space.later");
+  assert.deepEqual(host.calls, [{ name: "space.move", args: { id: "s1", index: 3 } }], "^b }: one place down");
+  runBar("newmenu");
+  assert.deepEqual([host.calls, host.overlays], [[{ name: "space.select", args: { id: "s1" } }],
+    [{ mod: "new-menu", kind: "popup", width: 250, height: 512 }]], "^b C: the + menu, in the space you're in");
+  runBar("space.next");
+  assert.deepEqual(host.calls, [{ name: "space.next", args: {} }], "outside RAM ^b ) is Herdr's");
+  host.shared.set("layout", "ram");
+  host.shared.set("ram.bp", { s2: "tab2-1" });
+  runBar("space.next");
+  assert.deepEqual(host.calls, [{ name: "tab.select", args: { id: "tab2-1" } }], "in RAM: the next space at its BP");
+  runBar("space.prev");
+  assert.deepEqual(host.calls, [{ name: "space.select", args: { id: "s0" } }], "no BP kept there yet: the space as it is");
+  host.shared.set("ram.bp", { s0: "tab0-0" });
+  for (const [c, cmd] of [["ram.enter", "enter"], ["ram.bp", "bp"], ["ram.peek", "peek"]]) {
+    runBar(c);
+    assert.deepEqual(host.calls, [{ name: c, args: {} }], `${c} goes to RAM (which hears it as ${cmd})`);
+  }
+}
 host.focused = null;
-console.log("PASS: the ^b bar (every layout) lists g lazygit and / rg-fzf (they work everywhere) and m, i, r under levels only while RAM shows");
+console.log("PASS: the ^b bar (every layout) lists g lazygit and / rg-fzf (they work everywhere), C, < > and { }, and RAM's keys under RAM only while RAM shows");
 // ^b w: navigate mode, as in the Herdr TUI, each move shown at once: j/k through the
 // spaces (the layout's own list marks the one it's on), h/l through that space's
 // tabs, H J K L the panes; Enter stays, Esc goes back. No picker.
@@ -2152,6 +3307,20 @@ console.log("PASS: the ^b bar (every layout) lists g lazygit and / rg-fzf (they 
   assert.deepEqual(host.calls, [{ name: "space.select", args: { id: "s3" } }, { name: "tab.select", args: { id: after } }]);
   await press(nb, "k");
   assert.equal(on(), "s2");
+  // In RAM a space shows at its BP, as clicking it does, and its tabs go on from there.
+  {
+    const bpWas = host.shared.get("ram.bp");
+    host.shared.set("layout", "ram"); host.shared.set("ram.bp", { s3: "tab3-1" }); host.calls = [];
+    await press(nb, "j");
+    assert.deepEqual(host.calls, [{ name: "tab.select", args: { id: "tab3-1" } }], "RAM: docs at its BP (&2)");
+    await press(nb, "l");
+    assert.deepEqual(host.calls.at(-1), { name: "tab.select", args: { id: "tab3-0" } }, "l: the tab after its BP");
+    host.calls = [];
+    await press(nb, "k");
+    assert.deepEqual(host.calls, [{ name: "space.select", args: { id: "s2" } }], "no BP kept for ops: the space as it is");
+    assert.equal(on(), "s2");
+    host.shared.set("ram.bp", bpWas); host.shared.set("layout", "traveler");
+  }
   // The lists mark it: RAM's stack (space level), its main stick and sticks (meta), Traveler, Night City.
   host.shared.set("ram.zoom", "space");
   assert.deepEqual(lastOp(must(R(side, { role: "side" }), "stack-s2"), "border_color"), ["#6fe3d3"], "RAM's stack: cyan");

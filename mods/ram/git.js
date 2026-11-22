@@ -4,8 +4,11 @@
 // command or an agent's turn ends there, when a local repo's files change
 // (watchFolder), and every minute as a fallback while the window is active.
 // Each changed file also gets its added/removed line counts (git diff --numstat),
-// for the main stick's tree and its changes view.
-import { machines, window, exec, watchFolder } from "herdr";
+// for the main stick's tree and its changes view. GIT's dialog (gitinit.js) asks
+// every copy to look again at a folder it made a repo (shared GIT_AGAIN).
+import { machines, window, exec, watchFolder, shared } from "herdr";
+
+export const GIT_AGAIN = "ram.git.again";
 
 const FALLBACK = 60000;
 // Changed files kept per repo (the changes view lists them all).
@@ -16,10 +19,17 @@ export const READ = ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", 
 const base = (path) => path.replace(/\/+$/, "").split("/").pop();
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-// Where a space is now: its first terminal's live folder, else where it was made.
-function place(s, ps) {
-  const tabs = new Set((s.tabs ?? []).map((c) => c.id));
-  return ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
+// Where a space is now: its first terminal's live folder (the first of its
+// tabs with a terminal in a folder, that tab's first one), else where it was
+// made. Herdr names a space nobody named after this folder's repo, else the
+// folder, so this is the repo a space is named after: its GIT, LANG and HUNK,
+// and what ^b g, ^b r and ^b / open on.
+export function place(s, ps) {
+  for (const t of s.tabs ?? []) {
+    const p = ps.find((x) => x.tab === t.id && x.cwd);
+    if (p) return p.cwd;
+  }
+  return s.folder;
 }
 // Every folder a space has a terminal in: its tabs are often different projects.
 function keysOf(s, ps) {
@@ -97,6 +107,16 @@ export class Git {
       }
     }
     this.busy = busy;
+    // A folder made a repo outside a terminal (GIT's dialog): it and the places under it.
+    const again = shared(GIT_AGAIN);
+    if (again?.at && again.at !== this.againAt && again.folder) {
+      this.againAt = again.at;
+      const top = String(again.folder).replace(/(.)\/+$/, "$1");
+      for (const k of keys) {
+        const [on, cwd] = JSON.parse(k);
+        if ((on ?? null) === (again.on ?? null) && (cwd === top || cwd.startsWith(top + "/"))) due.add(k);
+      }
+    }
     for (const m of machines()) {
       const ready = m.layout === "ready";
       if (ready && this.ready[m.name] === false) for (const k of keys) if (JSON.parse(k)[0] === m.name) due.add(k);
@@ -203,31 +223,27 @@ export class Git {
     });
   }
 
-  // The folders a space's terminals are in, in the order its repo is looked
-  // for: the shown tab's (the focused terminal first), then the other tabs',
-  // else where the space was made.
+  // The folders a space's terminals are in: its first terminal's (place())
+  // first, then its tabs' in order, else where the space was made.
   folders(s, ps) {
-    const order = new Map((s.tabs ?? []).map((t, i) => [t.id, t.active ? -1 : i]));
-    const mine = ps.filter((p) => order.has(p.tab) && p.cwd)
-      .sort((a, b) => order.get(a.tab) - order.get(b.tab) || (b.focused ? 1 : 0) - (a.focused ? 1 : 0));
-    const dirs = [...new Set(mine.map((p) => p.cwd))];
-    if (!dirs.length && s.folder) dirs.push(s.folder);
-    return dirs;
+    const order = new Map((s.tabs ?? []).map((t, i) => [t.id, i]));
+    const mine = ps.filter((p) => order.has(p.tab) && p.cwd).sort((a, b) => order.get(a.tab) - order.get(b.tab));
+    return [...new Set([place(s, ps), ...mine.map((p) => p.cwd)].filter(Boolean))];
   }
 
-  // The repo a space's git line, GIT and lazygit use: the first of its folders
-  // that is one. undefined while a folder before it hasn't been looked at yet,
-  // null when none is a repo (or the space has no folder).
+  // The repo a space is named after (its first terminal's folder's): its git
+  // line, GIT, LANG, HUNK and its tools use it, and only it. undefined while
+  // that folder hasn't been looked at yet, null when it isn't in a repo (or
+  // the space has no folder). Another tab in another repo doesn't stand in.
   info(s, ps) {
-    for (const d of this.folders(s, ps)) {
-      const g = this.git[JSON.stringify([s.machine ?? null, d])];
-      if (g === undefined) return undefined;
-      if (g) return g;
-    }
-    return null;
+    const d = place(s, ps);
+    if (!d) return null;
+    const g = this.git[JSON.stringify([s.machine ?? null, d])];
+    return g === undefined ? undefined : g;
   }
 
-  // Every repo a space's terminals are in, its main one (info()) first.
+  // Every repo a space's terminals are in, its own (info()) first: the main
+  // stick lists them all.
   repos(s, ps) {
     const out = new Map();
     for (const d of this.folders(s, ps)) {
@@ -245,15 +261,14 @@ export class Git {
   // A space's git as short marks, the way push and pull already read (↑2 ↓1):
   //   head   "repo · branch" of its main repo (the repo or branch goes when the
   //          space name already says it, and main/master go)
-  //   marks  ↑n commits to push, ↓n to pull, ±n uncommitted files, ⌂ a repo
-  //          with no remote (⌂2: two), or ✓ when none of those; added up over
-  //          the space's repos
+  //   marks  ↑n commits to push, ↓n to pull, ±n uncommitted files, ⌂ no
+  //          remote, or ✓ when none of those, for the space's own repo
   //   tip    the same in words, on one line (tooltips can't wrap)
   // repo is info(): undefined while checking, null when there's none.
   summary(s, ps) {
     const g = this.info(s, ps);
     if (!g) return { repo: g, head: null, marks: [], tip: g === undefined ? "Checking git\u2026" : "Not a git repo" };
-    const all = this.repos(s, ps);
+    const all = [g];
     const same = (a) => a.toLowerCase() === (s.name ?? "").toLowerCase();
     const raw = g.branch ?? "detached";
     const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;

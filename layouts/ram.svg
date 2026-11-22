@@ -7,7 +7,8 @@
     <text x="210" y="4.5">0x0C00</text><text x="260" y="4.5">0x1000</text>
   </g>
 
-  <!-- The strip: the space you're in, its tabs, +, then ^b and the level buttons. -->
+  <!-- The strip: the space you're in, its tabs, +, then ^b, the two levels with
+       their pointers (meta SP▸, space BP▸), b (the side column) and P (the peek strip). -->
   <g font-family="monospace" font-size="4.2">
     <text x="7" y="14.6" fill="#6fe3d3">0x02</text><text x="18.5" y="14.6" fill="#ffb547">web</text>
   </g>
@@ -16,19 +17,23 @@
     <rect x="68" y="9" width="30" height="8" rx="0.8" fill="#0b130f" stroke="#24402f"/>
     <rect x="101" y="9" width="30" height="8" rx="0.8" fill="#0b130f" stroke="#24402f"/>
     <rect x="134" y="9" width="8" height="8" rx="0.8" fill="#0b130f" stroke="#2c4a38"/>
-    <rect x="234" y="9" width="24" height="8" rx="0.8" fill="#2a2412" stroke="#ffb547"/>
-    <rect x="261" y="9" width="26" height="8" rx="0.8" fill="#0b130f" stroke="#2c4a38"/>
-    <rect x="290" y="9" width="24" height="8" rx="0.8" fill="#0b130f" stroke="#2c4a38"/>
+    <rect x="229" y="9" width="30" height="8" rx="0.8" fill="#2a2412" stroke="#ffb547"/>
+    <rect x="262" y="9" width="30" height="8" rx="0.8" fill="#0b130f" stroke="#2c4a38"/>
+    <rect x="295" y="9" width="8" height="8" rx="0.8" fill="#2a2412" stroke="#ffb547"/>
+    <rect x="306" y="9" width="8" height="8" rx="0.8" fill="#2a2412" stroke="#ffb547"/>
   </g>
   <g font-family="monospace" font-size="3.8">
     <text x="33.5" y="14.4" fill="#ffb547">*1</text><text x="41" y="14.4" fill="#ffb547">claude</text>
     <text x="70.5" y="14.4" fill="#6f9a7e">&amp;2</text><text x="78" y="14.4" fill="#c8f7d3">zsh</text>
     <text x="103.5" y="14.4" fill="#6f9a7e">&amp;3</text><text x="111" y="14.4" fill="#c8f7d3">zsh</text>
     <text x="136.4" y="14.6" fill="#c8f7d3">+</text>
-    <text x="225" y="14.4" fill="#6f9a7e">^b</text>
-    <text x="236.5" y="14.4" fill="#ffb547">m</text><text x="241" y="14.4" fill="#ffb547">meta</text>
-    <text x="263.5" y="14.4" fill="#ffb547">i</text><text x="268" y="14.4" fill="#5f8a70">space</text>
-    <text x="292.5" y="14.4" fill="#ffb547">r</text><text x="297" y="14.4" fill="#5f8a70">hunk</text>
+    <text x="222" y="14.4" fill="#6f9a7e">^b</text>
+    <text x="234.3" y="14.4" fill="#ffb547">m</text><text x="237.9" y="14.4" fill="#ffb547">meta</text>
+    <text x="248.3" y="14.3" fill="#ffb547" font-size="3" font-weight="bold">SP▸</text>
+    <text x="266.2" y="14.4" fill="#ffb547">i</text><text x="269.8" y="14.4" fill="#c8f7d3">space</text>
+    <text x="282.5" y="14.3" fill="#ffffff" font-size="3" font-weight="bold">BP▸</text>
+    <text x="297.9" y="14.4" fill="#ffb547" font-weight="bold">b</text>
+    <text x="308.9" y="14.4" fill="#ffb547" font-weight="bold">P</text>
   </g>
   <line x1="0" y1="20.5" x2="320" y2="20.5" stroke="#24402f" stroke-width="0.5"/>
 
@@ -90,9 +95,10 @@
   <g fill="#ffb547" opacity="0.8"><rect x="98" y="88" width="3" height="3"/><rect x="104" y="88" width="64" height="2.6"/></g>
   <rect x="98" y="116" width="2.4" height="4" fill="#c8f7d3"/>
 
-  <!-- Every space as a stick: STACK frames (each tab: SP on the shown one, &n, an arrow
-       to its blocks), HEAP growing up, the git line and the gold pins. Narrowed a
-       little (from x 92) to leave room for the + and f on the right. -->
+  <!-- Every space as a stick: STACK frames (each tab: &n, an arrow to its blocks;
+       SP▸ on the one tab meta shows, a BP▸ on each space's work tab, white for the
+       space you work in), HEAP growing up, the git line and the gold pins. Narrowed
+       a little (from x 92) to leave room for the +, f and e on the right. -->
   <g font-family="monospace" transform="matrix(0.959 0 0 1 3.772 0)">
     <rect x="92" y="133" width="52" height="58" rx="1" fill="#0b130f" stroke="#24402f" stroke-width="0.5"/>
     <rect x="148" y="133" width="52" height="58" rx="1" fill="#0f1c15" stroke="#ffb547" stroke-width="0.6"/>
@@ -117,17 +123,18 @@
       <text x="206" y="179.5">HEAP ↑  1</text><text x="262" y="179.5">HEAP ↑</text>
     </g>
     <g font-size="2.8">
-      <!-- 0x01 api -->
-      <text x="94" y="150.3" fill="#ffb547" fill-opacity="0.5">SP▸</text><text x="102" y="150.3" fill="#ffb547" fill-opacity="0.5">*1</text>
+      <!-- 0x01 api: its BP (dim: not the space you work in) -->
+      <text x="94" y="150.3" fill="#6f9a7e" font-weight="bold">BP▸</text><text x="102" y="150.3" fill="#9fc7aa">*1</text>
       <text x="102" y="156.3" fill="#6f9a7e">&amp;2</text>
-      <!-- 0x02 web: the space you're in -->
+      <!-- 0x02 web: SP on *1 (the tab meta shows), its BP on *2 (white: the space you work in) -->
       <rect x="148.3" y="146.5" width="51.4" height="4.8" fill="#ffb547" fill-opacity="0.08"/>
-      <text x="150" y="150.3" fill="#ffb547">SP▸</text><text x="158" y="150.3" fill="#ffb547">*1</text>
-      <text x="158" y="156.3" fill="#6f9a7e">&amp;2</text><text x="158" y="162.3" fill="#6f9a7e">&amp;3</text>
+      <text x="150" y="150.3" fill="#ffb547" font-weight="bold">SP▸</text><text x="158" y="150.3" fill="#ffb547">*1</text>
+      <text x="150" y="156.3" fill="#ffffff" font-weight="bold">BP▸</text><text x="158" y="156.3" fill="#ffffff">*2</text>
+      <text x="158" y="162.3" fill="#6f9a7e">&amp;3</text>
       <!-- 0x03 ops, on another machine -->
-      <text x="206" y="150.3" fill="#ffb547" fill-opacity="0.5">SP▸</text><text x="214" y="150.3" fill="#ffb547" fill-opacity="0.5">*1</text>
+      <text x="206" y="150.3" fill="#6f9a7e" font-weight="bold">BP▸</text><text x="214" y="150.3" fill="#9fc7aa">*1</text>
       <!-- 0x04 docs -->
-      <text x="262" y="150.3" fill="#ffb547" fill-opacity="0.5">SP▸</text><text x="270" y="150.3" fill="#ffb547" fill-opacity="0.5">*1</text>
+      <text x="262" y="150.3" fill="#6f9a7e" font-weight="bold">BP▸</text><text x="270" y="150.3" fill="#9fc7aa">*1</text>
     </g>
     <g fill="none" stroke="#6f9a7e" stroke-width="0.35" stroke-linecap="round" stroke-linejoin="round">
       <path d="M107 149.3H115M113.8 148.1L115 149.3L113.8 150.5"/><path d="M107 155.3H115M113.8 154.1L115 155.3L113.8 156.5"/>
@@ -160,7 +167,7 @@
       <line x1="208" y1="168" x2="252" y2="168"/><line x1="264" y1="168" x2="308" y2="168"/>
     </g>
     <g font-size="2.6">
-      <rect x="94" y="171.4" width="1.6" height="1.6" fill="#5f8a70"/><text x="97" y="173.1" fill="#6f9a7e">&amp;1</text><text x="101.5" y="173.1" fill="#c8f7d3">claude</text><text x="134" y="173.1" fill="#6f9a7e">Idle</text>
+      <rect x="94" y="171.4" width="1.6" height="1.6" fill="#5f8a70"/><text x="97" y="173.1" fill="#6f9a7e">*1</text><text x="101.5" y="173.1" fill="#c8f7d3">claude</text><text x="134" y="173.1" fill="#6f9a7e">Idle</text>
       <rect x="150" y="171.4" width="1.6" height="1.6" fill="#7dff9b"/><text x="153" y="173.1" fill="#ffb547">*1</text><text x="157.5" y="173.1" fill="#c8f7d3">claude</text><text x="186" y="173.1" fill="#7dff9b">Working</text>
       <rect x="204.3" y="169.6" width="51.4" height="4.6" fill="#2a0f14"/>
       <rect x="206" y="171.4" width="1.6" height="1.6" fill="#ff5f6d"/><text x="209" y="173.1" fill="#6f9a7e">*1</text><text x="213.5" y="173.1" fill="#ffd0d4">claude</text>
@@ -176,11 +183,13 @@
       <rect x="263" y="192.2" width="18" height="1.6"/><rect x="285" y="192.2" width="24" height="1.6"/>
     </g>
   </g>
-  <!-- Right of the last stick: + (a new space) and under it follow's f (off here). -->
+  <!-- Right of the last stick: + (a new space), then follow's f and the e switch (both off here). -->
   <rect x="306" y="133" width="6" height="6" rx="0.6" fill="none" stroke="#2c4a38" stroke-width="0.5" stroke-dasharray="1 0.7"/>
   <rect x="306" y="141" width="6" height="6" rx="0.6" fill="none" stroke="#2c4a38" stroke-width="0.5"/>
+  <rect x="306" y="149" width="6" height="6" rx="0.6" fill="none" stroke="#2c4a38" stroke-width="0.5"/>
   <g font-family="monospace" font-size="3.6">
     <text x="307.9" y="137.3" fill="#c8f7d3">+</text>
     <text x="307.9" y="145.3" fill="#9fc7aa" font-weight="bold">f</text>
+    <text x="307.9" y="153.3" fill="#9fc7aa" font-weight="bold">e</text>
   </g>
 </svg>

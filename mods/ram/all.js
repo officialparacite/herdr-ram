@@ -7,8 +7,9 @@
 //            panel lists them (M/A/D, folder/name, +added -removed; the arrow
 //            folds a space); + makes a new space, a double-click renames one,
 //            and a space dragged onto another moves there (as in the space
-//            level's stack). HEAP: every agent from every space, the oldest at
-//            the bottom; under it, the git marks of all the repos together.
+//            level's stack). HEAP: every agent from every space and every
+//            command running in their tabs (procs.js), the oldest at the
+//            bottom; under it, the git marks of all the repos together.
 //   diff     the Changes panel by space: the spaces with changes and their
 //            files, the selected file's diff, and a commit box that commits
 //            everything in that file's repo (git add -A, then commit). The w
@@ -16,10 +17,10 @@
 //            line is one row and the rows scroll sideways.
 // A file clicked in memory opens it in diff.
 import { div } from "gpui-kit";
-import { h_flex, v_flex, InputState, Input, v_virtual_list } from "gpui-base";
+import { h_flex, v_flex, InputState, Input, v_virtual_list, ScrollHandle } from "gpui-base";
 import { exec, readTextFile, theme, settings, panes, shared, setShared, run } from "herdr";
 import { READ } from "./git.js";
-import { AMBER, CYAN, GOLD, GREEN, RED, U, ADDR, REF, STATUS, stop, led, marks, identity, navigating } from "./ui.js";
+import { AMBER, CYAN, GOLD, GREEN, RED, U, ADDR, REF, STATUS, stop, led, marks, tipOf, navigating, finished, DONE_BG } from "./ui.js";
 
 const HEADER_H = 19 * U, LABEL_H = 13 * U, STACK_H = 18 * U, SPACE_ROW = 20 * U, REPO_ROW = 15 * U, FILE_ROW = 17 * U;
 const HEAP_ROW = 19 * U, BOTTOM_H = 21 * U, PINS_H = 6 * U, DIFF_ROW = 15 * U, COMMIT_H = 30 * U;
@@ -100,6 +101,8 @@ export class AllStick {
     this.typing = false;
     this.message = "";
     this.input = InputState.new({ placeholder: "Commit message" });
+    // The tree's scroll position, so the keyboard can bring a row into view.
+    this.treeScroll = ScrollHandle.new();
     this.input.on("change", (_e, cx) => {
       const had = Boolean(this.message.trim());
       this.message = this.input.value();
@@ -132,6 +135,8 @@ export class AllStick {
     this.wrapCache = { rows: this.rows, cols, out };
     return out;
   }
+
+  closeDiff() { this.sel = null; this.rows = []; this.loadKey = null; }
 
   toggleFold(id) {
     if (this.fold.has(id)) this.fold.delete(id); else this.fold.add(id);
@@ -252,23 +257,24 @@ export class AllStick {
   render(data, width, height, cx) {
     this.sync(data, cx);
     const t = theme();
-    const toggle = h_flex().id("ram-all-toggle").h(15 * U).px(5 * U).gap(4 * U).flex_none().items_center().rounded(2)
+    const toggle = this.view.reach(h_flex().id("ram-all-toggle").h(15 * U).px(5 * U).gap(4 * U).flex_none().items_center().rounded(2)
       .border(1).border_color(this.mode === "changes" ? AMBER : t.input).when(this.mode === "changes", el => el.bg(AMBER + "1f"))
       .cursor_pointer().hover(st => st.bg(t.hover))
       .tooltip(this.mode === "changes" ? "Back to memory: the tree and every agent" : "Diff: each changed file's diff, and a commit box")
       .on_mouse_down("left", stop)
       .on_click((_e, cx) => { cx.stop_propagation(); this.toggle(); cx.notify(); })
       .children(this.view.key("ram.changes") ? [div().text_size(10 * U).font_semibold().text_color(AMBER).child(this.view.key("ram.changes"))] : [])
-      .child(div().text_size(10 * U).text_color(this.mode === "changes" ? AMBER : t.muted).child("diff"));
+      .child(div().text_size(10 * U).text_color(this.mode === "changes" ? AMBER : t.muted).child("diff")),
+      "ram-all-toggle", { open: () => this.toggle(), hint: this.mode === "changes" ? "memory" : "diff" });
     // w: the diff's long lines wrap (lit) or scroll sideways (the default).
     const wrap = this.wrap;
-    const wrapBox = div().id("ram-all-wrap").size(15 * U).flex_none().flex().items_center().justify_center().rounded(2)
+    const wrapBox = this.view.reach(div().id("ram-all-wrap").size(15 * U).flex_none().flex().items_center().justify_center().rounded(2)
       .border(1).border_color(wrap ? AMBER : t.input).when(wrap, el => el.bg(AMBER + "1f"))
       .text_size(10 * U).text_color(wrap ? AMBER : t.muted).cursor_pointer().hover(st => st.bg(t.hover))
       .tooltip(wrap ? "Long diff lines wrap (click: one row each, scrolling sideways)" : "Wrap long diff lines")
       .on_mouse_down("left", stop)
       .on_click((_e, cx) => { cx.stop_propagation(); setShared("ram.all.wrap", !wrap); cx.notify(); })
-      .child("w");
+      .child("w"), "ram-all-wrap", { open: () => setShared("ram.all.wrap", !wrap), hint: wrap ? "one row each" : "wrap" });
     const header = h_flex().id("ram-all-head").h(HEADER_H).flex_none().px(6 * U).gap(6 * U).items_center().border_b(1).border_color(t.border)
       .child(div().flex_none().text_size(11 * U).text_color(CYAN).child(ADDR(0)))
       .child(div().flex_1().min_w(0).truncate().text_size(12 * U).font_semibold().text_color(t.foreground).child("@"))
@@ -294,8 +300,9 @@ export class AllStick {
       if (r.kind === "space") groups.push({ s: r.s, rows: [] });
       groups.at(-1)?.rows.push(r);
     }
-    return v_flex().id("ram-all-tree").w_full().h(height).flex_none().overflow_y_scrollbar()
-      .children(groups.map(({ s, rows: own }) => {
+    return v_flex().id("ram-all-tree").w_full().h(height).flex_none().overflow_y_scrollbar().track_scroll(this.treeScroll)
+      .children(groups.map(({ s, rows: own }, gi) => {
+        this.group = gi;
         const group = v_flex().id(`all-group-${s.id}`).relative().flex_none().children(own.map(r => this.row(r, data, t)));
         return v.dragMarks(v.droppable(group, "space", s.id, s.machine ?? "", from => v.moveSpace(from, s.id)),
           "space", s.id, order, "y");
@@ -316,8 +323,10 @@ export class AllStick {
   spaceRow({ s, i, count }, data, t) {
     const v = this.view, sum = v.gitInfo?.summary(s, panes());
     const open = !this.fold.has(s.id), blocked = data.blockers.filter(a => a.space === s.id).length;
-    const hunks = v.marker(s.id);
-    return h_flex().id(`all-space-${s.id}`).h(SPACE_ROW).flex_none().px(6 * U).gap(5 * U).items_center().cursor_pointer()
+    const done = [...data.list, ...(data.procs ?? [])].filter(a => a.space === s.id && a.status === "done" && !a.child).length;
+    const hunks = v.marker(s.id), gi = this.group, scroll = () => this.treeScroll?.scroll_to_item(gi);
+    const fold = want => { if (count > 0 && open !== want) this.toggleFold(s.id); };
+    return v.reach(h_flex().id(`all-space-${s.id}`).h(SPACE_ROW).flex_none().px(6 * U).gap(5 * U).items_center().cursor_pointer()
       .when(s.active, el => el.bg(AMBER + "14")).hover(st => st.bg(t.hover))
       // ^b w's navigate mode is on it.
       .when(navigating() === s.id, el => el.border(1).border_color(CYAN))
@@ -341,14 +350,18 @@ export class AllStick {
       .children(hunks ? [hunks] : [])
       .children(sum?.repo ? marks(sum, 10.5 * U) : [])
       .when(blocked > 0, el => el.child(div().flex_none().px(3 * U).rounded(2).bg("#3a1118").border(1).border_color(RED)
-        .text_size(10 * U).text_color(RED).child(`!${blocked}`)));
+        .text_size(10 * U).text_color(RED).child(`!${blocked}`)))
+      .when(done > 0, el => el.child(finished(done))),
+      `all-space-${s.id}`, { open: () => v.go(s.id), rename: () => run("space.rename", { id: s.id }),
+        fold: count > 0 ? want => fold(want) : null, scroll, hint: "show" });
   }
 
   fileRow({ s, r, f, depth }, t) {
     const here = this.sel && this.sel.space === s.id && this.sel.top === r.top && this.sel.path === f.path;
+    const gi = this.group, scroll = () => this.treeScroll?.scroll_to_item(gi);
     const parts = f.path.split("/"), name = parts.pop(), dir = parts.length ? parts.join("/") + "/" : "";
     const lines = f.binary ? "binary" : `+${f.add ?? 0} ${minus(f.del ?? 0)}`;
-    return h_flex().id(`all-file-${s.id}:${f.path}`).h(FILE_ROW).flex_none().pl(TREE_X + TREE_STEP * depth).pr(6 * U).gap(6 * U).items_center()
+    return this.view.reach(h_flex().id(`all-file-${s.id}:${f.path}`).h(FILE_ROW).flex_none().pl(TREE_X + TREE_STEP * depth).pr(6 * U).gap(6 * U).items_center()
       .cursor_pointer().when(here, el => el.bg(t.selected)).hover(st => st.bg(t.hover))
       .tooltip(`${f.path}: ${f.fresh ? "new file" : lines}`)
       .on_mouse_down("left", stop)
@@ -358,14 +371,16 @@ export class AllStick {
         .child(div().min_w(0).truncate().text_color(t.dim).child(dir))
         .child(div().flex_none().max_w(170 * U).truncate().text_color(here ? AMBER : t.foreground).child(name)))
       .when(f.add > 0, el => el.child(div().flex_none().text_size(10 * U).text_color(GREEN).child(`+${f.add}`)))
-      .when(f.del > 0, el => el.child(div().flex_none().text_size(10 * U).text_color(RED).child(minus(f.del))));
+      .when(f.del > 0, el => el.child(div().flex_none().text_size(10 * U).text_color(RED).child(minus(f.del)))),
+      `all-file-${s.id}:${f.path}`, { open: cx => this.pick(s, r, f, cx), scroll, hint: "its diff" });
   }
 
-  // memory: the tree (STACK) above every agent (HEAP), then the totals.
+  // memory: the tree (STACK) above every agent and running command (HEAP,
+  // procs.js), then the totals.
   memory(data, height, t) {
     const rows = this.tree(data);
-    const born = a => data.rawByAddress.get(a.address)?.created_ms ?? 0;
-    const heap = data.list.filter(a => !a.hunk).sort((a, b) => born(b) - born(a));
+    const born = a => a.proc ? a.since : data.rawByAddress.get(a.address)?.created_ms ?? 0;
+    const heap = [...data.list, ...(data.procs ?? [])].filter(a => !a.hunk).sort((a, b) => born(b) - born(a));
     const label = text => div().h(LABEL_H).flex_none().px(6 * U).text_size(10 * U).text_color(t.dim).child(text);
     // STACK's label, as the space level's: it counts the spaces, + pushes a new one.
     const stack = h_flex().h(STACK_H).flex_none().px(6 * U).gap(5 * U).items_center()
@@ -415,10 +430,10 @@ export class AllStick {
   }
 
   heapRow(a, active, t) {
-    const red = a.status === "blocked", mine = a.space === active?.id && a.tab === active?.tabs.find(x => x.active)?.id;
-    return h_flex().id(`all-heap-${a.address}`).h(HEAP_ROW).flex_none().px(6 * U).gap(5 * U).items_center().cursor_pointer()
-      .when(red, el => el.bg("#2a0f14")).hover(st => st.bg(red ? "#3a1520" : t.hover))
-      .tooltip(identity(a))
+    const red = a.status === "blocked", fin = a.status === "done", mine = a.space === active?.id && a.tab === active?.tabs.find(x => x.active)?.id;
+    return this.view.reach(h_flex().id(`all-heap-${a.address}`).h(HEAP_ROW).flex_none().px(6 * U).gap(5 * U).items_center().cursor_pointer()
+      .when(red, el => el.bg("#2a0f14")).when(fin, el => el.bg(DONE_BG + "aa")).hover(st => st.bg(red ? "#3a1520" : t.hover))
+      .tooltip(tipOf(a))
       .on_mouse_down("left", stop)
       .on_click((_e, cx) => { cx.stop_propagation(); this.view.open(a); })
       .child(led(a, 6, this.view.motion()))
@@ -426,7 +441,8 @@ export class AllStick {
       .child(div().flex_none().text_size(10.5 * U).text_color(mine ? AMBER : t.dim).child(REF(a.tab_index, mine)))
       .child(div().flex_1().min_w(0).truncate().text_size(11 * U).text_color(red ? "#ffd0d4" : t.foreground)
         .child(`${a.program?.name || "agent"}${a.child ? " \u21b3" : ""}`))
-      .child(div().flex_none().text_size(10 * U).text_color(red ? RED : t[a.status] ?? t.dim).child(STATUS[a.status] ?? ""));
+      .child(div().flex_none().text_size(10 * U).when(fin, el => el.font_semibold()).text_color(red ? RED : fin ? CYAN : t[a.status] ?? t.dim)
+        .child(STATUS[a.status] ?? "")), `all-heap-${a.address}`, { open: () => this.view.open(a), hint: a.proc ? "peek" : "show" });
   }
 
   // changes: the files by space (up to 40% of the room), the selected file's
@@ -449,9 +465,10 @@ export class AllStick {
       .when(Boolean(sel), el => el
         .when(sel.add > 0, e => e.child(div().flex_none().text_color(GREEN).child(`+${sel.add}`)))
         .when(sel.del > 0, e => e.child(div().flex_none().text_color(RED).child(minus(sel.del))))
-        .child(div().id("ram-all-diff-close").flex_none().px(3 * U).text_color(t.dim).cursor_pointer().hover(st => st.text_color(RED))
+        .child(this.view.reach(div().id("ram-all-diff-close").flex_none().px(3 * U).text_color(t.dim).cursor_pointer().hover(st => st.text_color(RED))
           .tooltip("Close the diff").on_mouse_down("left", stop)
-          .on_click((_e, cx) => { cx.stop_propagation(); this.sel = null; this.rows = []; this.loadKey = null; cx.notify(); }).child("\u00d7")));
+          .on_click((_e, cx) => { cx.stop_propagation(); this.closeDiff(); cx.notify(); }).child("\u00d7"),
+          "ram-all-diff-close", { open: () => this.closeDiff(), close: () => this.closeDiff(), hint: "close the diff" })));
     const diffRowsShown = this.wrap ? this.wrapped(wrapColumns(width)) : this.rows;
     const list = v_virtual_list("ram-all-diff-rows", diffRowsShown.length, DIFF_ROW, i => String(i),
       range => diffRowsShown.slice(range.start, range.end).map(row => this.diffRow(row, t))).size_full();
@@ -462,16 +479,18 @@ export class AllStick {
     const target = sel ? this.repos(data).find(r => r.top === sel.top) : null;
     const can = Boolean(sel && this.message.trim() && !this.busy);
     const commit = h_flex().id("ram-all-commit-row").h(COMMIT_H).flex_none().px(6 * U).gap(6 * U).items_center().border_t(1).border_color(t.border)
-      .child(div().id("ram-all-commit-message").flex_1().min_w(0).h(22 * U).px(6 * U).flex().items_center().rounded(2).border(1)
+      .child(this.view.reach(div().id("ram-all-commit-message").flex_1().min_w(0).h(22 * U).px(6 * U).flex().items_center().rounded(2).border(1)
         .border_color(this.typing ? AMBER : t.input).cursor_text()
         .tooltip(target ? `Commits all ${target.dirty} changed files in ${target.name} (${sel.name})` : "Pick a file first: its repo is the one committed")
         .on_mouse_down("left", stop)
-        .child(Input.new(this.input).h_full().text_size(11 * U).text_color(t.foreground)))
-      .child(div().id("ram-all-commit").h(22 * U).px(8 * U).flex_none().flex().items_center().rounded(2).text_size(11 * U)
+        .child(Input.new(this.input).h_full().text_size(11 * U).text_color(t.foreground)),
+        "ram-all-commit-message", { open: () => this.input.focus(), hint: "type the message" }))
+      .child(this.view.reach(div().id("ram-all-commit").h(22 * U).px(8 * U).flex_none().flex().items_center().rounded(2).text_size(11 * U)
         .bg(can ? AMBER : t.raised).text_color(can ? "#0a100d" : t.dim).when(can, el => el.cursor_pointer())
         .on_mouse_down("left", stop)
         .on_click((_e, cx) => { cx.stop_propagation(); this.commit(cx); })
-        .child(this.busy ? "Committing\u2026" : target ? `Commit ${target.name}` : "Commit"));
+        .child(this.busy ? "Committing\u2026" : target ? `Commit ${target.name}` : "Commit"),
+        "ram-all-commit", { open: cx => this.commit(cx), hint: "commit" }));
     return [
       summary,
       this.treeList(rows, Math.min(Math.max(SPACE_ROW, fits), Math.max(SPACE_ROW, room * 0.4)), data, t),

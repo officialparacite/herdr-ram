@@ -16,13 +16,20 @@ parts from these projects:
   spaces mod of the Traveler layout, https://github.com/franky5440-afk/herdr-traveler
   (Copyright 2026 Frank Lin, Apache License 2.0), which is derived from the
   built-in spaces mod of Herdr (https://github.com/herdrdev/herdr-app,
-  Apache License 2.0). This copy adds each changed file's line counts.
+  Apache License 2.0). This copy adds each changed file's line counts, and a
+  space's repo is the one its first terminal is in.
 
 - mods/text-bigger and mods/text-smaller change settings.json the way Herdr's
   own Settings screen does (Herdr, Apache License 2.0).
 
-Everything else (mods/ram/main.js, ui.js, all.js, hunk.js, arrow.svg,
-mods/prefix, keys.json, layouts/, themes/, nvim/ and tests/) is new code.
+- mods/ram-menu (a terminal's right-click menu) has the items of Herdr's own
+  menu mod (Herdr, Apache License 2.0), with Copy and Paste added first.
+
+- mods/ram/langs.js gives each language the color and kind GitHub's Linguist
+  gives it (https://github.com/github-linguist/linguist, MIT License below).
+
+Everything else (the rest of mods/ram and mods/ram-menu, mods/prefix,
+keys.json, layouts/, themes/, nvim/ and tests/) is new code.
 
 ----------------------------------------------------------------------------
 Night City (vib-z/herdr-layouts):
@@ -30,6 +37,32 @@ Night City (vib-z/herdr-layouts):
 MIT License
 
 Copyright (c) 2026 vib-z
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----------------------------------------------------------------------------
+GitHub Linguist (github-linguist/linguist), for the language colors and kinds
+in mods/ram/langs.js:
+
+MIT License
+
+Copyright (c) 2017 GitHub, Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

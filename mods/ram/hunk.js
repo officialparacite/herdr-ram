@@ -1,14 +1,15 @@
-// Hunk in RAM: the hunk level and its reviews.
+// Hunk in RAM: the reviews, listed under HUNK in the space level's column.
 //
-// ^b r (or the r hunk button) opens a menu of what hunk can show (diff,
-// diff --staged, show, log, stash show, status, with an optional ref). The
-// pick opens in a tab of its own at the space's repo, labelled ram.hunk=<what>
-// and moved to the end so the space's own tabs keep their numbers. Those tabs
-// stay out of the tab strip and the meta frames: they're listed under HUNK at
-// the top of the side column in the hunk level, and each space shows how many
-// it has (a small cyan ◆n). Quitting hunk closes its tab; ^b r again goes back
-// to the tab you came from and leaves the review open, so an agent can still
-// work on its notes (an agent's hunk skill finds sessions with `hunk session list`).
+// ^b r (or HUNK's header) shows the space's last review; with none it opens
+// the menu HUNK's + opens, of what hunk can show (diff, diff --staged, show,
+// log, stash show, status, with an optional ref). The pick opens in a tab of
+// its own at the space's repo, labelled ram.hunk=<what> and moved to the end
+// so the space's own tabs keep their numbers. Those tabs stay out of the tab
+// strip and the meta frames: the space level lists the space's reviews under
+// HUNK (between GIT and LANG), and each space shows how many it has (a small
+// cyan ◆n). Quitting hunk closes its tab; ^b r again goes back to where you
+// came from and leaves the review open, so an agent can still work on its
+// notes (an agent's hunk skill finds sessions with `hunk session list`).
 //
 // The live sessions come from `hunk session list --json`. Each session's pid
 // is its terminal's process (RAM starts hunk with exec), or the foreground
@@ -17,7 +18,7 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input } from "gpui-base";
 import { exec, setShared, props, closeOverlay, theme } from "herdr";
-import { AMBER, CYAN, U, stop } from "./ui.js";
+import { AMBER, CYAN, U, stop, ago, sameDir } from "./ui.js";
 
 export const HUNK_LABEL = "ram.hunk";
 
@@ -40,10 +41,6 @@ export const COMMANDS = [
 ];
 // What a review is called: its command, with the ref when there's one.
 export const labelOf = (cmd, ref) => cmd.ref && ref ? `${cmd.name} ${ref}` : cmd.name;
-
-// /private/tmp and /tmp are the same folder on macOS (hunk reports the first).
-const real = p => String(p ?? "").replace(/^\/private(?=\/(?:tmp|var)(?:\/|$))/, "");
-const sameDir = (a, b) => Boolean(a && b) && real(a) === real(b);
 
 // One session from `hunk session list --json`, as RAM keeps it: your notes
 // (source "user") apart from the agents'.
@@ -170,36 +167,40 @@ export class HunkMenu {
   }
 }
 
-// ---------------------------------------------------------------- the HUNK list
+// ---------------------------------------------------------------- the HUNK bar
 
-export const HUNK_ROW = 22 * U, HUNK_HEAD = 20 * U;
+// HUNK, in the space level's column between GIT and LANG: the reviews RAM opened
+// in this space, one per line: what it shows, its notes (✎n) and how long ago it
+// opened. Its lines have the heights hunkHeight() counts.
+export const HUNK_PAD = 6 * U, HUNK_TOP = 17 * U, HUNK_GAP = 3 * U, HUNK_LINE = 17 * U;
+export const hunkHeight = n => 1 + 2 * HUNK_PAD + HUNK_TOP + n * (HUNK_GAP + HUNK_LINE);
 
-// The rows' order: this space's reviews first, then the others by space.
-export function ordered(list, spaceList) {
-  const s = spaceList.find(x => x.active), index = id => spaceList.findIndex(x => x.id === id);
-  return [...list].sort((a, b) => Number(b.space === s?.id) - Number(a.space === s?.id)
-    || (a.space ? index(a.space) : 1e9) - (b.space ? index(b.space) : 1e9));
-}
+// A space's reviews (entries() of RAM's own, in its tabs), oldest first; the ones
+// for its own repo (TOP) are the ones ^b r goes to.
+export const reviewsIn = (list, spaceId) => list.filter(e => e.ram && e.tab && e.space === spaceId);
+export const forRepo = (list, top) => list.filter(e => sameDir(e.cwd, top));
 
-// One review's row. VIEW: the map/side copy (its hover and close helpers).
-export function hunkRow(view, e, shownTab) {
-  const t = theme(), here = Boolean(e.tab && e.tab === shownTab);
-  const key = e.id ?? e.terminal, short = e.id ? e.id.slice(0, 4) : "";
-  const notes = [e.mine ? `${e.mine} of your notes` : "", e.agent ? `${e.agent} agent notes` : ""].filter(Boolean).join(", ") || "no notes";
-  const tip = `${e.title || nameOf(e)}: ${notes}${short ? ` \u00b7 /hunk ${short}` : ""} \u00b7 ${e.spaceName ? "in " + e.spaceName : "outside Herdr"}`;
+// The words on a review's line, for its width: name, notes, age.
+const notesOf = e => (e.mine ?? 0) + (e.agent ?? 0);
+
+// One review's line. VIEW: the side copy (its hover and close helpers, showTool).
+// SHOWN: the tab that shows; CREATED: when its terminal started (ms), or null.
+export function hunkLine(view, e, shown, created) {
+  const t = theme(), here = e.tab === shown, n = notesOf(e), key = e.terminal ?? e.tab;
+  const short = e.id ? e.id.slice(0, 4) : "";
+  const words = [e.mine ? `${e.mine} of your notes` : "", e.agent ? `${e.agent} agent notes` : ""].filter(Boolean).join(", ") || "no notes";
   const hovered = view.hoverTab === `hunk:${key}`;
-  return h_flex().id(`hunk-${key}`).h(HUNK_ROW).flex_none().px(10 * U).gap(6 * U).items_center()
-    .when(here, el => el.bg(AMBER + "14")).when(Boolean(e.tab), el => el.cursor_pointer().hover(st => st.bg(t.hover)))
+  return h_flex().id(`hunk-${key}`).h(HUNK_LINE).flex_none().gap(6 * U).items_center().rounded(2).cursor_pointer()
+    .when(here, el => el.bg(AMBER + "14")).hover(st => st.bg(t.hover))
     .on_hover(view.hovering(`hunk:${key}`))
-    .tooltip(tip)
+    .tooltip(`${e.title || nameOf(e)}: ${words}${short ? ` \u00b7 /hunk ${short}` : ""}${here ? "" : " \u00b7 click: show it"}`)
     .on_mouse_down("left", stop)
-    .on_click((_e, cx) => { cx.stop_propagation(); if (e.tab) view.go(e.space, e.tab); })
+    .on_click((_e, cx) => { cx.stop_propagation(); view.showTool(e.tab); })
     .child(div().flex_none().text_size(10 * U).text_color(here ? AMBER : CYAN).child("\u25c6"))
-    .child(div().flex_1().min_w(0).truncate().text_size(11.5 * U).font_semibold().text_color(here ? AMBER : t.foreground).child(nameOf(e)))
-    .child(div().flex_none().max_w(70 * U).truncate().text_size(10.5 * U).text_color(t.dim).child(e.spaceName ?? "outside"))
-    .when(e.mine > 0, el => el.child(div().flex_none().text_size(10.5 * U).text_color(AMBER).child(`\u270e${e.mine}`)))
-    .when(Boolean(short), el => el.child(div().flex_none().text_size(10 * U).text_color(t.dim).child(short)))
-    .when(e.ram && Boolean(e.tab), el => el.child(view.closeHunk(`hunkx-${key}`, e, 14 * U, hovered)));
+    .child(div().flex_1().min_w(0).truncate().text_size(11 * U).text_color(here ? AMBER : t.foreground).child(nameOf(e)))
+    .when(n > 0, el => el.child(div().flex_none().text_size(10.5 * U).text_color(AMBER).child(`\u270e${n}`)))
+    .when(created != null, el => el.child(div().flex_none().text_size(10.5 * U).text_color(t.dim).child(ago(created))))
+    .child(view.closeHunk(`hunkx-${key}`, e, 14 * U, hovered));
 }
 
 // The marker on a space with open reviews: ◆ and how many, small and cyan.
