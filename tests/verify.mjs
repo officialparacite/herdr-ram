@@ -155,14 +155,16 @@ const stub = url(`
   export const shared = k => host.shared.get(k), setShared = (k, v) => host.shared.set(k, v);
   export const setAgentOrder = x => host.order = x;
   export const window = () => ({ active: host.active, platform: host.platform, buttons: host.buttons });
-  // layout(): the live layout tree (host.layout); layout.resize changes it, as
-  // Herdr does, unless host.layoutLag holds it back.
+  // layout(): the live layout tree (host.layout); layout.resize, show, hide and
+  // toggle change it, as Herdr does, unless host.layoutLag holds it back.
   export const layout = () => host.layout ?? null;
   const findNode = (n, id) => n?.id === id ? n : (n?.children ?? []).map(c => findNode(c, id)).find(Boolean) ?? null;
+  const LAYOUT_CMDS = ["layout.resize", "layout.show", "layout.hide", "layout.toggle"];
   // host.events: runs and overlay closes in the order they happened.
   export const run = (name, args) => { host.calls.push({ name, args }); (host.events ??= []).push("run " + name);
-    const n = name === "layout.resize" && host.layout && !host.layoutLag ? findNode(host.layout, args.id) : null;
-    if (n) n.size = args.px !== undefined ? { px: args.px } : { weight: args.weight }; };
+    const n = LAYOUT_CMDS.includes(name) && host.layout && !host.layoutLag ? findNode(host.layout, args.id) : null;
+    if (n && name === "layout.resize") n.size = args.px !== undefined ? { px: args.px } : { weight: args.weight };
+    else if (n) n.hidden = name === "layout.hide" || (name === "layout.toggle" && n.hidden !== true); };
   export const openOverlay = spec => { host.overlays.push(spec); return "o" + host.overlays.length; };
   export const notify = n => host.notes.push(n);
   export const closeOverlay = id => { (host.closed ??= []).push(id); (host.events ??= []).push("close " + id); }, commands = () => [], focused = () => host.focused ?? null, home = () => "/home/tester";
@@ -213,7 +215,7 @@ async function load(path) {
   return u;
 }
 const gitURL = await load("mods/ram/git.js");
-const { default: Ram, LEVELS, level, sideWidth, fitBlocks, RG_TAB } = await import(await load("mods/ram/main.js"));
+const { default: Ram, LEVELS, level, sideWidth, sideHidden, sticksShown, fitBlocks, RG_TAB } = await import(await load("mods/ram/main.js"));
 // Spawned tasks run at once; settle() lets their awaits finish. (Some never end,
 // like the command loop waiting on nextCommand, so they can't be awaited.)
 // A focus handle has the keyboard while host.keyboard is it (focus() gives it).
@@ -342,17 +344,20 @@ assert(!withId(tree, "ram-level-hunk"), "no hunk level: HUNK is a bar in the spa
     assert.deepEqual(op(withId(tree, id), "size"), [26 * 1.25], `${id}: a square as tall as the buttons`);
     assert.deepEqual(op(withId(tree, id), "border_color"), ["#ffb547"], `${id}: lit, it shows`);
   }
-  assert.equal(op(withId(tree, "ram-sidebar"), "tooltip")[0], "Hide the side column  ^b b");
-  assert(op(withId(tree, "ram-peek-toggle"), "tooltip")[0].startsWith("Hide the peek strip") && op(withId(tree, "ram-peek-toggle"), "tooltip")[0].endsWith("  ^b P"));
+  assert.equal(op(withId(tree, "ram-sidebar"), "tooltip")[0], "Hide the side column in the space level  ^b b");
+  assert(op(withId(tree, "ram-peek-toggle"), "tooltip")[0].startsWith("Hide the peek strip in the space level (SP's tab") && op(withId(tree, "ram-peek-toggle"), "tooltip")[0].endsWith("  ^b P"));
   host.calls = [];
   click(tree, "ram-sidebar");
   assert.deepEqual(host.calls, [{ name: "layout.toggle", args: { id: "sidebar" } }], "b: the side column, as ^b b");
   host.layout = { id: "root", type: "row", children: [{ id: "sidebar", type: "block", hidden: true }] };
   assert.notDeepEqual(op(withId(R(map, {}), "ram-sidebar"), "border_color"), ["#ffb547"], "hidden: not lit");
   host.layout = null;
+  host.shared.delete("ram.side.hidden");
   click(tree, "ram-peek-toggle");
   assert.equal(host.shared.get("ram.peek"), false, "P: the peek strip off");
+  assert.equal(host.shared.get("ram.sticks"), undefined, "(meta's sticks are meta's)");
   assert.notDeepEqual(op(withId(R(map, {}), "ram-peek-toggle"), "border_color"), ["#ffb547"], "off: not lit");
+  assert(op(withId(R(map, {}), "ram-peek-toggle"), "tooltip")[0].startsWith("Show the peek strip in the space level"));
   click(R(map, {}), "ram-peek-toggle");
   assert.equal(host.shared.get("ram.peek"), true, "and on again");
   host.shared.delete("ram.peek");
@@ -374,6 +379,10 @@ await settle();
 assert.deepEqual(layoutCalls(), [{ name: "layout.resize", args: { id: "ram-map", px: 74 } },
   { name: "layout.resize", args: { id: "sidebar", px: 390 } }, { name: "layout.show", args: { id: "ram-rams" } }],
   "(the peek strip stays hidden: meta has none)");
+// In meta, b and P are meta's: its side column, and the sticks under its terminal.
+assert.equal(op(withId(tree, "ram-sidebar"), "tooltip")[0], "Hide the side column in meta  ^b b");
+assert.equal(op(withId(tree, "ram-peek-toggle"), "tooltip")[0], "Hide the sticks in meta  ^b P");
+assert.equal(sticksShown(), true, "meta shows its sticks");
 assert.deepEqual(host.shared.get("ram.sp"), { space: "s0", tab: "tab0-0", pane: null }, "meta's first show: SP is the tab it shows");
 assert(withId(tree, "ram-strip") && withId(tree, "tabchip-tab0-0"), "the strip stays on top: the space's tabs");
 assert(!withId(tree, "ram-follow"), "follow isn't on the strip: its f is under the sticks' +");
@@ -1032,6 +1041,191 @@ console.log("PASS: drag to reorder: tabs on the strip and the sticks' frames (ta
   host.shared.set("ram.zoom", "space");
 }
 console.log("PASS: the side column's edge drags (ram-work's gap); each level keeps the width you leave it at, the level's own resize never counts, the main stick follows");
+
+// ---- The side column shown or hidden, and P, each level's own ---------------------------------
+{
+  const saved = new Map(host.shared);
+  const find = (n, id) => n?.id === id ? n : (n?.children ?? []).map(c => find(c, id)).find(Boolean) ?? null;
+  const sidebarNode = () => find(host.layout, "sidebar");
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const toggles = id => layoutCalls().filter(c => c.args.id === id && c.name !== "layout.resize");
+  const SHOW = id => ({ name: "layout.show", args: { id } }), HIDE = id => ({ name: "layout.hide", args: { id } });
+  const kept = () => host.shared.get("ram.side.hidden");
+  host.layout = JSON.parse(JSON.stringify(layout));  // the live layout, as the file has it: the side column shown
+  host.shared.set("ram.zoom", "space");
+  const before = host.timers.length;
+  const hm = view({});
+  const watch = host.timers.slice(before)[1];
+  assert.equal(watch.ms, 250);
+  await settle();
+  let next = host.waiting.at(-1);
+  const sendHm = async c => { const w = next, b = host.waiting.length; w(c); await settle(); next = host.waiting.slice(b).at(-1); };
+  const HR = () => R(hm, {});
+  host.calls = [];
+  HR(); await settle();
+  assert.deepEqual(toggles("sidebar"), [], "at the start the side column stays as the layout has it");
+  assert.equal(kept(), undefined, "shown: nothing kept");
+  // b (as ^b b: Herdr's layout.toggle) in the space level: the space level keeps it hidden.
+  click(HR(), "ram-sidebar");
+  assert.equal(sidebarNode().hidden, true);
+  let t = HR();
+  assert.deepEqual(kept(), { space: true }, "hidden in the space level: kept for it");
+  assert.deepEqual([sideHidden("space"), sideHidden("meta")], [true, false]);
+  assert.equal(op(withId(t, "ram-sidebar"), "tooltip")[0], "Show the side column in the space level  ^b b");
+  assert.notDeepEqual(op(withId(t, "ram-sidebar"), "border_color"), ["#ffb547"], "hidden: not lit");
+  // meta keeps its own: ^b m shows it there, and that show isn't yours.
+  host.shared.set("ram.zoom", "meta"); host.calls = [];
+  HR(); await settle();
+  assert.deepEqual(toggles("sidebar"), [SHOW("sidebar")], "meta: shown, as meta has it");
+  t = HR();
+  assert.deepEqual(kept(), { space: true }, "meta's own show isn't kept as yours");
+  assert.deepEqual(op(withId(t, "ram-sidebar"), "border_color"), ["#ffb547"], "meta: lit");
+  watch.fn(cx);
+  assert.equal(hm.hiddenBase, false, "it settles on meta's");
+  // ^b i: hidden again in the space level; shown there, nothing to keep.
+  host.shared.set("ram.zoom", "space"); host.calls = [];
+  HR(); await settle();
+  assert.deepEqual(toggles("sidebar"), [HIDE("sidebar")], "the space level: hidden, as you left it");
+  assert.equal(sidebarNode().hidden, true);
+  click(HR(), "ram-sidebar");
+  HR();
+  assert.deepEqual(kept(), {}, "shown in the space level: forgotten");
+  // A hide right before a level change is kept for the level it was made in,
+  // even when the timer looks before the new level is applied.
+  sidebarNode().hidden = true;
+  host.shared.set("ram.zoom", "meta"); host.calls = [];
+  watch.fn(cx);
+  assert.equal(kept().meta, undefined, "not taken for meta's");
+  HR(); await settle();
+  assert.deepEqual(kept(), { space: true }, "kept for the space level, where you hid it");
+  assert.deepEqual(toggles("sidebar"), [SHOW("sidebar")], "and meta shows its own");
+  HR();
+  // The timer keeps one too, with no render in between.
+  sidebarNode().hidden = true;
+  watch.fn(cx);
+  assert.deepEqual(kept(), { space: true, meta: true }, "hidden in meta: kept for meta");
+  sidebarNode().hidden = false;
+  watch.fn(cx);
+  assert.deepEqual(kept(), { space: true });
+  // The level's own show or hide is never yours, even while the layout is slow to follow it...
+  host.layoutLag = true;
+  host.shared.set("ram.zoom", "space"); host.calls = [];
+  HR(); await settle();
+  assert.deepEqual(toggles("sidebar"), [HIDE("sidebar")]);
+  watch.fn(cx); HR(); await sleep(50); watch.fn(cx);
+  assert.deepEqual(kept(), { space: true }, "not taken for a show in the space level");
+  sidebarNode().hidden = true;
+  watch.fn(cx);
+  assert.equal(hm.hiddenBase, true);
+  host.layoutLag = false;
+  // ...or when the layout holds it back for good (after 2 s it's where the level is).
+  host.layoutLag = true;
+  host.shared.set("ram.zoom", "meta"); host.calls = [];
+  HR(); await settle();
+  hm.hideWant.at -= 2500;
+  watch.fn(cx);
+  assert.deepEqual(kept(), { space: true }, "a state the layout kept isn't yours");
+  assert.equal(hm.hiddenBase, true);
+  host.layoutLag = false;
+  // That show is given up: the space level, which keeps it hidden, has nothing to do.
+  host.shared.set("ram.zoom", "space"); host.calls = [];
+  HR(); await settle();
+  assert.deepEqual(toggles("sidebar"), [], "hidden already: nothing to do");
+  host.shared.set("ram.zoom", "meta"); host.calls = [];
+  HR(); await settle(); HR();
+  assert.deepEqual(toggles("sidebar"), [SHOW("sidebar")], "meta's show, sent again");
+  sidebarNode().hidden = false; watch.fn(cx);
+  // Two level changes before the first one's own show or hide lands: the second
+  // goes after it, and neither is yours when they land.
+  host.layoutLag = true;
+  host.shared.set("ram.zoom", "space"); host.calls = [];
+  HR(); await settle();
+  host.shared.set("ram.zoom", "meta");
+  HR(); await settle();
+  assert.deepEqual(toggles("sidebar"), [HIDE("sidebar"), SHOW("sidebar")], "meta shows it after the space level's hide");
+  host.layoutLag = false;
+  sidebarNode().hidden = true; watch.fn(cx);
+  sidebarNode().hidden = false; watch.fn(cx);
+  assert.deepEqual(kept(), { space: true }, "neither counted as yours");
+  assert.equal(hm.hiddenBase, false);
+  // Back again before the hide lands: it's already going where the space level wants.
+  host.layoutLag = true;
+  host.shared.set("ram.zoom", "space"); host.calls = [];
+  HR(); await settle();
+  host.shared.set("ram.zoom", "meta"); HR(); await settle();
+  host.shared.set("ram.zoom", "space"); HR(); await settle();
+  assert.deepEqual(toggles("sidebar"), [HIDE("sidebar"), SHOW("sidebar"), HIDE("sidebar")]);
+  host.layoutLag = false;
+  sidebarNode().hidden = true; watch.fn(cx);
+  assert.deepEqual(kept(), { space: true });
+  host.calls = [];
+  host.shared.set("ram.zoom", "meta"); HR(); await settle(); HR();
+  assert.deepEqual(toggles("sidebar"), [SHOW("sidebar")]);
+  // ^b d: the diff view is in meta's side column, so it shows the column again.
+  sidebarNode().hidden = true; watch.fn(cx);
+  assert.deepEqual(kept(), { space: true, meta: true });
+  host.shared.set("ram.all.mode", "memory"); host.calls = [];
+  await sendHm("changes");
+  assert.deepEqual([host.shared.get("ram.all.mode"), kept()], ["changes", { space: true }], "meta, its column hidden: the diff, and the column back");
+  assert.deepEqual(toggles("sidebar"), [SHOW("sidebar")]);
+  assert.equal(sidebarNode().hidden, false);
+  watch.fn(cx);
+  await sendHm("changes");
+  assert.equal(host.shared.get("ram.all.mode"), "memory", "its column shown: d switches the view, as before");
+  host.shared.set("ram.side.hidden", { space: true, meta: true });
+  host.shared.set("ram.zoom", "space"); HR(); await settle(); HR();
+  host.calls = [];
+  await sendHm("changes");
+  assert.deepEqual([host.shared.get("ram.zoom"), host.shared.get("ram.all.mode"), kept()], ["meta", "changes", { space: true }],
+    "from the space level: meta with the diff, its column kept shown");
+  HR(); await settle();
+  assert.deepEqual(toggles("sidebar"), [SHOW("sidebar")], "meta shows the main stick");
+  HR();
+  host.shared.set("ram.all.mode", "memory");
+  // P in meta: its sticks hide (the terminal takes their room); the space level's peek strip stays on.
+  host.calls = [];
+  click(HR(), "ram-peek-toggle");
+  assert.deepEqual([host.shared.get("ram.sticks"), host.shared.get("ram.peek")], [false, undefined]);
+  t = HR(); await settle();
+  assert.deepEqual(toggles("ram-rams"), [HIDE("ram-rams")], "meta's sticks hide");
+  assert.equal(sticksShown(), false);
+  assert.equal(op(withId(t, "ram-peek-toggle"), "tooltip")[0], "Show the sticks in meta  ^b P");
+  assert.notDeepEqual(op(withId(t, "ram-peek-toggle"), "border_color"), ["#ffb547"], "not lit");
+  host.shared.set("ram.zoom", "space"); host.calls = [];
+  t = HR(); await settle();
+  assert.deepEqual(toggles("ram-rams"), [], "the space level has no sticks anyway");
+  assert.deepEqual(op(withId(t, "ram-peek-toggle"), "border_color"), ["#ffb547"], "its P is the peek strip's, on");
+  host.shared.set("ram.zoom", "meta"); host.calls = [];
+  HR(); await settle();
+  assert.deepEqual(toggles("ram-rams"), [], "back in meta: still hidden");
+  click(HR(), "ram-peek-toggle");
+  HR(); await settle();
+  assert.deepEqual(toggles("ram-rams"), [SHOW("ram-rams")], "P again: back");
+  assert.equal(host.shared.get("ram.sticks"), true);
+  // Hidden, the sticks' copy reads nothing (as in the space level).
+  const tb = host.timers.length;
+  const rv = view({ role: "rams" });
+  const [gitT, exitsT, tailsT] = host.timers.slice(tb);
+  assert.deepEqual([gitT.ms, exitsT.ms, tailsT.ms], [250, 10000, 2000]);
+  const ran = { git: 0, exits: 0, tails: 0 };
+  rv.gitInfo.tick = () => ran.git++; rv.checkExits = () => ran.exits++; rv.readTails = () => ran.tails++; rv.update = () => {};
+  host.shared.set("ram.sticks", false);
+  gitT.fn(cx); exitsT.fn(cx); tailsT.fn(cx);
+  assert.deepEqual(ran, { git: 0, exits: 0, tails: 0 }, "hidden in meta: nothing");
+  host.shared.delete("ram.sticks");
+  gitT.fn(cx); exitsT.fn(cx); tailsT.fn(cx);
+  assert.deepEqual(ran, { git: 1, exits: 1, tails: 1 }, "shown: its git, the exit history and the last lines");
+  // A copy that starts (the app, a reload) keeps what the layout has for its level.
+  host.shared.delete("ram.side.hidden");
+  sidebarNode().hidden = true;
+  const fresh = view({}); host.calls = [];
+  R(fresh, {}); await settle();
+  assert.deepEqual(toggles("sidebar"), [], "nothing shown or hidden at the start");
+  assert.deepEqual(kept(), { meta: true }, "meta keeps the hidden column it started with");
+  host.layout = null; host.calls = [];
+  host.shared.clear(); for (const [k, v] of saved) host.shared.set(k, v);
+}
+console.log("PASS: each level keeps its side column shown or hidden (b, ^b b) and its own P (meta: the sticks, the space level: the peek strip); the level's own show never counts; ^b d shows meta's column");
 
 // ---- The main stick (0x00 @) ---------------------------------------------------------------
 // git.js: each changed file with its Changes-panel letter and its +/- line counts.
@@ -2343,12 +2537,20 @@ console.log("PASS: commands in HEAP: a shell's command shows the moment it runs 
   assert.deepEqual(moves(), [{ name: "tab.select", args: { id: "tab0-0" } }], "at SP's tab (ram.goto)");
   show("s0", "tab0-0"); await PM();
   host.shared.delete("ram.enter");
-  // ^b P (ram.peek): the peek strip off and on.
+  // ^b P (ram.peek): what's under the terminal, the level's own. In meta its
+  // sticks off and on, the space level's peek strip left as it was...
   await send("peek");
-  assert.equal(host.shared.get("ram.peek"), false);
+  assert.deepEqual([host.shared.get("ram.sticks"), host.shared.get("ram.peek")], [false, undefined], "meta: the sticks off");
+  await send("peek");
+  assert.deepEqual([host.shared.get("ram.sticks"), host.shared.get("ram.peek")], [true, undefined], "and on");
+  // ...and in the space level its peek strip, meta's sticks left as they were.
+  host.shared.set("ram.zoom", "space");
+  await send("peek");
+  assert.deepEqual([host.shared.get("ram.sticks"), host.shared.get("ram.peek")], [true, false], "the space level: the peek strip off");
   await send("peek");
   assert.equal(host.shared.get("ram.peek"), true);
-  host.shared.delete("ram.peek");
+  host.shared.set("ram.zoom", "meta");
+  host.shared.delete("ram.peek"); host.shared.delete("ram.sticks");
   // Meta has no peek strip; the space level's shows SP's tab, unless it's the tab you're on.
   const pk = view({ role: "peek" });
   host.shared.set("ram.sp", { space: "s1", tab: "tab1-0", pane: null });
@@ -2686,6 +2888,17 @@ console.log("PASS: hunk: menu, reviews in their own tabs (out of the strip, ◆n
   assert.deepEqual(peekCalls(), [{ name: "layout.resize", args: { id: "ram-peek", px: 180 } }], "nothing usable: the layout's 180");
   ph.sharePeekHeight(12, cx);
   assert.equal(host.shared.get("ram.peek.h"), 56, "never under its header and a line");
+  // With the side column hidden (^b b in the space level) there's no line to meet:
+  // the peek strip keeps the height it had.
+  host.shared.set("ram.peek.h", want);
+  host.layout = { id: "root", type: "row", children: [{ id: "sidebar", type: "block", hidden: true }] };
+  ph.size = { width: 340, height: 270 };
+  R(ph, { role: "side" }); await settle();
+  assert.equal(host.shared.get("ram.peek.h"), want, "the column hidden: the height it had");
+  host.layout.children[0].hidden = false;
+  R(ph, { role: "side" }); await settle();
+  assert.notEqual(host.shared.get("ram.peek.h"), want, "shown: from the column again");
+  host.layout = null; ph.size = { width: 340, height: 900 };
   host.shared.delete("ram.peek.h"); host.shared.set("ram.sp", { space: "s0", tab: "tab0-0", pane: null });
 }
 // Its boxes show as many of their last lines as fit that height (not a fixed 8).
@@ -3100,9 +3313,18 @@ assert(barText.includes("follow") && barText.includes("f") && barText.includes("
 {
   // Each key right before what it does (the bar writes shift-i as I).
   const pair = (k, label) => barText.some((x, i) => x === k && barText[i + 1] === label);
+  const zoomWas = host.shared.get("ram.zoom");
+  host.shared.set("ram.zoom", "space");
+  barText = textOf(bar.render(cx2));
   for (const [k, label] of [["e", "enter"], ["I", "BP here"], ["P", "peek"], ["C", "new\u2026"], ["<", "move \u2190"], [">", "move \u2192"],
     ["{", "move \u2191"], ["}", "move \u2193"], ["m", "meta"], ["i", "space"], ["r", "hunk"]])
     assert(pair(k, label), `${k} ${label}`);
+  // In meta, P hides the sticks under its terminal.
+  host.shared.set("ram.zoom", "meta");
+  barText = textOf(bar.render(cx2));
+  assert(pair("P", "sticks") && !barText.includes("peek"), "meta: P sticks");
+  host.shared.set("ram.zoom", zoomWas);
+  barText = textOf(bar.render(cx2));
 }
 assert(!barText.includes("changes"), "the bar says diff, as the main stick does");
 assert(barText.includes("^b") && !barText.some(x => /ctrl-b/.test(x)), `the bar writes the prefix as ^b: ${barText}`);

@@ -135,6 +135,10 @@ function pick(list, rows, also = null) {
 // The strip (ram-map) is on top in both levels. meta: the main stick in the
 // side column, the terminal over the space sticks (ram-rams). The peek strip
 // (ram-peek) shows in the space level when there's something to show (peekSources()).
+// Each level keeps its own side column shown or hidden (shared SIDE_HIDDEN:
+// { meta: true } while you hid it in meta; applyLevel(), watchHidden()), and P
+// (^b P) hides what's under its terminal: meta's sticks (shared STICKS false),
+// the space level's peek strip (shared "ram.peek" false).
 // The peek strip's height (main.js applyPeek): from the space level's side column,
 // at least PEEK_MIN px (its header and a line). PEEK_KEEP: the most last lines
 // each of its boxes keeps (a tall window's strip).
@@ -143,6 +147,18 @@ export const LEVELS = {
   meta: { map: { px: 74 }, side: 390, rams: true },
   space: { map: { px: 74 }, side: 340, rams: false },
 };
+const SIDE_HIDDEN = "ram.side.hidden", STICKS = "ram.sticks";
+// Whether level LVL keeps its side column hidden.
+export const sideHidden = lvl => shared(SIDE_HIDDEN)?.[lvl] === true;
+// Whether the space sticks show: in meta, unless P hid them.
+export const sticksShown = () => LEVELS[level()].rams && shared(STICKS) !== false;
+// Keep the side column shown or hidden for level LVL.
+function keepHidden(lvl, hidden) {
+  const kept = { ...(shared(SIDE_HIDDEN) ?? {}) };
+  if ((kept[lvl] === true) === hidden) return;
+  if (hidden) kept[lvl] = true; else delete kept[lvl];
+  setShared(SIDE_HIDDEN, kept);
+}
 // The side column's edge drags (the ram-work row is resizable), down to its
 // min in layouts/ram.json. Each level keeps the width you dragged it to
 // (shared "ram.side"); the strip's copy gives each level its width.
@@ -165,6 +181,11 @@ function findNode(node, id) {
 const sidebarPx = () => {
   const px = Number(findNode(layout(), "sidebar")?.size?.px);
   return Number.isFinite(px) && px > 0 ? px : null;
+};
+// Whether the layout has the side column hidden now, or null (no layout).
+const sidebarHidden = () => {
+  const node = findNode(layout(), "sidebar");
+  return node ? node.hidden === true : null;
 };
 // The model, without hunk's terminals: hunk reports itself like an agent,
 // but a review isn't one (the HUNK list shows reviews). Its procs are the
@@ -277,10 +298,10 @@ export default class Ram extends View {
     this.gitInfo = new Git();
     // Whose git each copy keeps: the side column every space's (in meta it is
     // the main stick, which lists them all, so it's ready when meta shows), the
-    // space sticks (rams) every space's while meta shows them, and the strip
-    // (the map copy) every space's too, for the tools it opens where you work.
+    // space sticks (rams) every space's while they show (sticksShown()), and the
+    // strip (the map copy) every space's too, for the tools it opens where you work.
     cx.timer.every(250, cx => {
-      if (role === "rams" && level() !== "meta") return;
+      if (role === "rams" && !sticksShown()) return;
       this.gitInfo.tick(spaces(), panes(), cx);
       // LANG reads the shown space's repo (langs.js reads only when it must).
       if (role === "side" && level() === "space" && this.langs) {
@@ -323,22 +344,23 @@ export default class Ram extends View {
         if (Array.isArray(stored)) this.history = stored;
       } catch (_) { this.history = []; }
       cx.timer.every(10000, cx => {
-        if (!window()?.active || level() !== "meta") return;
+        if (!window()?.active || !sticksShown()) return;
         this.update(readScene(this));
         this.checkExits(cx);
         cx.notify();
       });
-      // The running commands' last lines, for the sticks' heaps.
+      // The running commands' last lines, for the sticks' heaps (while they show).
       this.tail = new Tail();
       cx.timer.every(2000, cx => {
-        if (window()?.active && level() === "meta") this.readTails(cx);
+        if (window()?.active && sticksShown()) this.readTails(cx);
       });
       this.bounce("up", cx);
       return;
     }
     if (role) return;
     // A drag on the side column's edge is kept for the level it was made in
-    // (watchSide, keepSide). Only an active window can be dragged.
+    // (watchSide, keepSide), and so is showing or hiding it (watchHidden). Only
+    // an active window can be dragged.
     // follow's trip (where it took SP, and where SP was before) and its move
     // back while that hasn't shown yet (follow(), goBack()).
     this.trip = null;
@@ -347,6 +369,7 @@ export default class Ram extends View {
       if (!window()?.active) return;
       this.watchSide(level());
       this.keepSide();
+      this.watchHidden(level());
     });
     // The commands running in your tabs (procs.js): kept here (as it draws, and
     // every second), shared with the other copies as "ram.procs"; their last
@@ -365,8 +388,9 @@ export default class Ram extends View {
     // at the bright BP), ram.hunk (the space you work in's review: its last
     // one, else the menu; on a review: back), ram.git (lazygit), ram.rg
     // (rg-fzf), ram.follow, ram.enter (the e square), ram.bp (BP moves to SP),
-    // ram.peek (the peek strip on or off), ram.changes (the main stick's
-    // view), ram.zoom, ram.back. "focus": the keyboard, handed straight back.
+    // ram.peek (P: meta's sticks, or the space level's peek strip, on or off),
+    // ram.changes (the main stick's view), ram.zoom, ram.back. "focus": the
+    // keyboard, handed straight back.
     cx.spawn(async cx => {
       for (;;) {
         const c = await nextCommand();
@@ -380,10 +404,15 @@ export default class Ram extends View {
         else if (c === "follow") this.toggleFollow();
         else if (c === "enter") setShared("ram.enter", shared("ram.enter") !== true);
         else if (c === "bp") this.bpHere();
-        else if (c === "peek") setShared("ram.peek", shared("ram.peek") === false);
+        else if (c === "peek") {
+          if (lvl === "meta") setShared(STICKS, shared(STICKS) === false);
+          else setShared("ram.peek", shared("ram.peek") === false);
+        }
         else if (c === "changes") {
-          // The main stick's changes view; outside meta, meta with it.
-          if (lvl !== "meta") { setShared("ram.all.mode", "changes"); setShared("ram.zoom", "meta"); }
+          // The main stick's changes view; outside meta, meta with it. The main
+          // stick is meta's side column: hidden, it shows again, and meta keeps it.
+          if (lvl !== "meta") { setShared("ram.all.mode", "changes"); keepHidden("meta", false); setShared("ram.zoom", "meta"); }
+          else if (sidebarHidden()) { setShared("ram.all.mode", "changes"); keepHidden("meta", false); run("layout.show", { id: "sidebar" }); }
           else setShared("ram.all.mode", shared("ram.all.mode") === "changes" ? "memory" : "changes");
         }
         else if (c === "back") this.back(cx);
@@ -455,21 +484,59 @@ export default class Ram extends View {
   // The map copy sizes the layout for the level it sees (once per change).
   // The side column gets the level's width (sideWidth()); a drag on its edge
   // that wasn't kept yet belongs to the level being left, so it's kept first.
+  // It shows or hides as the level keeps it (sideHidden(); a show or hide of
+  // yours not kept yet is the level being left's too). At the start it stays as
+  // the layout has it, which the level then keeps (watchHidden()).
   // Then the level's place shows (restore()): not at the start, where Herdr
   // shows what it showed, nor while a tool's tab is being opened (it shows that).
   applyLevel(lvl, cx) {
     if (this.applied === lvl) return;
     const was = this.applied;
-    if (was) { this.watchSide(was); this.keepSide(true); }
+    if (was) { this.watchSide(was); this.keepSide(true); this.watchHidden(was); }
     this.applied = lvl;
     const L = LEVELS[lvl], side = sideWidth(lvl);
     this.sideWant = { px: side, at: Date.now() };
+    // Where the side column is going: an own show or hide still on its way
+    // decides (watchHidden() above dropped one that landed or went stale), else
+    // the layout. The level's own goes after it.
+    const pending = this.hideWant;
+    const now = pending ? pending.hidden : sidebarHidden(), hide = was ? sideHidden(lvl) : now;
+    const toggle = now !== null && hide !== now ? (hide ? "layout.hide" : "layout.show") : null;
+    if (toggle) this.hideWant = { hidden: hide, at: Date.now() };
     cx.spawn(async () => {
       run("layout.resize", { id: "ram-map", ...L.map });
       run("layout.resize", { id: "sidebar", px: side });
-      run(L.rams ? "layout.show" : "layout.hide", { id: "ram-rams" });
+      if (toggle) run(toggle, { id: "sidebar" });
     });
     if (was && !opening()) this.restore(lvl, cx);
+  }
+
+  // The space sticks' block (ram-rams): shown while they show (sticksShown():
+  // meta, unless P hid them).
+  applySticks(cx) {
+    const want = sticksShown();
+    if (this.sticksOn === want) return;
+    this.sticksOn = want;
+    cx.spawn(async () => run(want ? "layout.show" : "layout.hide", { id: "ram-rams" }));
+  }
+
+  // Whether you showed or hid the side column (^b b, the b square): the layout's
+  // flag for it moved away from where it settled after the level's own show or
+  // hide (that one is waited for, up to 2 s, so it never counts as yours). The
+  // level keeps it (keepHidden()); the first look keeps what the layout has.
+  watchHidden(lvl) {
+    const hidden = sidebarHidden();
+    if (hidden === null || this.applied !== lvl) return;
+    const want = this.hideWant;
+    if (want) {
+      if (hidden !== want.hidden && Date.now() - want.at < 2000) return;
+      this.hideWant = null;
+      this.hiddenBase = hidden;
+      return;
+    }
+    if (hidden === this.hiddenBase) return;
+    this.hiddenBase = hidden;
+    keepHidden(lvl, hidden);
   }
 
   // A level change shows that level's place: SP for meta, the bright BP for
@@ -984,7 +1051,8 @@ export default class Ram extends View {
   // keys.json, so they always match), the current one lit, and each with the
   // mark of its pointer (SP▸ amber, BP▸ white), as on the sticks. While SP is
   // on an agent that needs you, meta's turns red and pulses. Then b (the side
-  // column) and P (the peek strip), lit while they show.
+  // column) and P (what's under the terminal: meta's sticks, the space level's
+  // peek strip), each for the level you're in, lit while they show.
   levelButtons(data) {
     const t = theme(), lvl = level(), s = frameSpace();
     const key = command => shortcut(command).split(" ").slice(1).join(" ");
@@ -1013,7 +1081,12 @@ export default class Ram extends View {
       .hover(st => st.bg(t.hover).text_color(AMBER)).tooltip(tip)
       .on_mouse_down("left", stop)
       .on_click((_e, cx) => { cx.stop_propagation(); action(); }).child(k);
-    const sideShown = !findNode(layout(), "sidebar")?.hidden, peekOn = shared("ram.peek") !== false;
+    const sideShown = sidebarHidden() !== true, where = lvl === "meta" ? "in meta" : "in the space level";
+    // P: what's under this level's terminal, meta's sticks or the space level's peek strip.
+    const under = lvl === "meta"
+      ? { key: STICKS, what: "the sticks in meta" }
+      : { key: "ram.peek", what: "the peek strip in the space level (SP's tab; under a review: where you came from)" };
+    const underOn = shared(under.key) !== false;
     return h_flex().id("ram-levels").flex_none().gap(6 * U).items_center()
       .when(Boolean(prefix), el => el.child(div().text_size(11 * U).text_color(t.dim).child(prefix)))
       .child(button("ram-level-meta", "meta", key("ram.meta"), lvl === "meta", "SP\u25b8", AMBER, () => this.goMeta(),
@@ -1022,9 +1095,9 @@ export default class Ram extends View {
       .child(button("ram-level-space", "space", key("ram.space"), lvl === "space", "BP\u25b8", BP_ON, () => this.enter(),
         s ? `space: ${s.name}, at its BP (your work tab)` : "No space yet"))
       .child(square("ram-sidebar", key("layout.toggle:sidebar") || "b", sideShown, () => run("layout.toggle", { id: "sidebar" }),
-        `${sideShown ? "Hide" : "Show"} the side column${shortcut("layout.toggle:sidebar") ? "  " + terse(shortcut("layout.toggle:sidebar")) : ""}`))
-      .child(square("ram-peek-toggle", key("ram.peek") || "P", peekOn, () => setShared("ram.peek", !peekOn),
-        `${peekOn ? "Hide" : "Show"} the peek strip (the space level: SP's tab; under a review: where you came from)${shortcut("ram.peek") ? "  " + terse(shortcut("ram.peek")) : ""}`));
+        `${sideShown ? "Hide" : "Show"} the side column ${where}${shortcut("layout.toggle:sidebar") ? "  " + terse(shortcut("layout.toggle:sidebar")) : ""}`))
+      .child(square("ram-peek-toggle", key("ram.peek") || "P", underOn, () => setShared(under.key, !underOn),
+        `${underOn ? "Hide" : "Show"} ${under.what}${shortcut("ram.peek") ? "  " + terse(shortcut("ram.peek")) : ""}`));
   }
 
   // ---------------------------------------------------------------- the keyboard in the side column
@@ -1754,8 +1827,8 @@ export default class Ram extends View {
     const detailsRoom = Math.max(0, this.size.height - 2 - memoryMin - KEYS_H);
     // The peek strip under the terminal is as tall as this column is from the line
     // over .rodata down (.rodata, GIT, HUNK, LANG, the keys, the bottom border), so
-    // its top lines up with that line.
-    this.sharePeekHeight(Math.min(detailsH, detailsRoom) + KEYS_H + 1, cx);
+    // its top lines up with that line. With the column hidden it keeps its height.
+    if (sidebarHidden() !== true) this.sharePeekHeight(Math.min(detailsH, detailsRoom) + KEYS_H + 1, cx);
     const details = v_flex().id("ram-side-details").flex_none()
       .when(detailsH > detailsRoom, el => el.h(detailsRoom).overflow_y_scrollbar())
       .child(this.machinesRegion(compact))
@@ -2046,6 +2119,8 @@ export default class Ram extends View {
     if (role === "rams") return this.rams(cx);
     const lvl = level(), data = readScene(this);
     this.applyLevel(lvl, cx);
+    this.applySticks(cx);
+    this.watchHidden(lvl);
     this.track(lvl, cx);
     this.follow(data, cx);
     this.shareRet(cx);

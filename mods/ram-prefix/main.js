@@ -259,7 +259,9 @@ function hints() {
   for (const [action, spellings] of byAction) {
     const base = action.split(":")[0];
     const id = MERGED.has(base) ? base : action;
-    const item = items.get(id) ?? { id, keys: [], label: LABELS[id] ?? action.replace(/[._:]/g, " ") };
+    // RAM's P hides what's under its terminal: in meta the sticks.
+    const label = id === "ram.peek" && shared("ram.zoom") === "meta" ? "sticks" : LABELS[id];
+    const item = items.get(id) ?? { id, keys: [], label: label ?? action.replace(/[._:]/g, " ") };
     item.keys.push(shown(spellings));
     items.set(id, item);
   }
