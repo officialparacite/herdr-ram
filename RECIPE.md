@@ -28,40 +28,42 @@ Neovim theme.
   tab, `&2` the rest, `!n` when an agent there needs you; long names
   truncate), one square `+`, and on the right `^b`, two fixed 100x26 level
   buttons, `m meta SP▸` and `i space BP▸` (the key in amber, the name, the
-  level's pointer: `SP▸` amber, `BP▸` white; the current level lit, meta's
-  red and pulsing while SP is on an agent that needs you), and two 26x26
-  squares, `b` (the side column) and `P` (the peek strip), lit while they
-  show. The left 100 points stay clear of the macOS window buttons.
+  level's pointer: `SP▸` amber, `BP▸` white; the current level lit, meta's red
+  and pulsing while SP is on an agent that needs you), and two 26x26 squares
+  for the level you're in, `b` (its side column) and `P` (what's under its
+  terminal: the sticks in meta, the peek strip in the space level), lit while
+  they show. The left 100 points stay clear of the macOS window buttons.
 - **The side column** (block `sidebar`) is 390px in meta and 340px in the
-  space level. Its edge drags (down to 240px) and each level keeps the width
-  you leave it at.
+  space level. Its edge drags (down to 240px), and each level keeps the width
+  you leave it at and whether it shows (`b`, `^b b`).
 - **meta:** the terminal on top (two thirds), under it every space as a stick
-  (one third, block `ram-rams`). A stick: a header (address, name, `◆n` open
-  reviews, `@machine`, `FAULT n`, a cyan boxed `+n` for agents and commands
-  that finished unseen), `STACK ↓ n`, one frame per tab (its pointers' mark,
-  `*n` where a pointer points or `&n`, an arrow, then a block per agent or
-  running command with its light and name, sub-agents smaller), free space,
-  the heap (one row per agent and running command: light, `&n`, name, what it
-  does or a command's last output line, its state) over `HEAP ↑ n`, the git
-  line (`branch ↑2 ↓1 ±3 ⌂`, or `✓`, and a `+` for a new tab), and gold pins.
-  The pointers' marks have a column of their own: `SP▸` (amber, pulsing) on
-  the one tab meta shows, across all the sticks; `BP▸` on each space's work
-  tab, white in the space you work in and dim in the others; `RET▸` (dim
-  amber) on follow's return address while it's away; two on one tab by their
-  initials (`SB▸`, `BR▸`). Sticks share one width, 200x1.25, narrowing to
-  128x1.25 before the row scrolls. Right of the last stick, three 30x1.25
-  squares, one under the other: a dashed `+` (a new space), follow's `f` and
-  `e`, each showing its `^b` key, amber while on; the space you're in has an
-  amber outline, another machine's a dashed one. The side column is the
-  **main stick** `0x00 @`: its STACK is every space with its changed files as
-  a tree (letter, folder/name, `+added −removed`, an arrow folds a space, `+`
-  makes a space), its HEAP every agent and command of every space (space name
-  first), and its last line `@` with every repo's marks added up. `d diff`
-  switches it to the diff view: the spaces with changes and their files, the
-  picked file's diff, and a commit box for that file's repo. A small `w` box
-  next to `d diff` wraps long diff lines to the stick (off: they scroll
-  sideways). Under it `.rodata` (other machines, `Add a machine`, `+`) and
-  Settings / Keys / Commands with their `^b` keys.
+  (one third, block `ram-rams`, which `P` hides to give the terminal the
+  room). A stick: a header (address, name, `◆n` open reviews, `@machine`,
+  `FAULT n`, a cyan boxed `+n` for agents and commands that finished unseen),
+  `STACK ↓ n`, one frame per tab (its pointers' mark, `*n` where a pointer
+  points or `&n`, an arrow, then a block per agent or running command with its
+  light and name, sub-agents smaller), free space, the heap (one row per agent
+  and running command: light, `&n`, name, what it does or a command's last
+  output line, its state) over `HEAP ↑ n`, the git line (`branch ↑2 ↓1 ±3 ⌂`,
+  or `✓`, and a `+` for a new tab), and gold pins. The pointers' marks have a
+  column of their own: `SP▸` (amber, pulsing) on the one tab meta shows,
+  across all the sticks; `BP▸` on each space's work tab, white in the space
+  you work in and dim in the others; `RET▸` (dim amber) on follow's return
+  address while it's away; two on one tab by their initials (`SB▸`, `BR▸`).
+  Sticks share one width, 200x1.25, narrowing to 128x1.25 before the row
+  scrolls. Right of the last stick, three 30x1.25 squares, one under the
+  other: a dashed `+` (a new space), follow's `f` and `e`, each showing its
+  `^b` key, amber while on; the space you're in has an amber outline, another
+  machine's a dashed one. The side column is the **main stick** `0x00 @`: its
+  STACK is every space with its changed files as a tree (letter, folder/name,
+  `+added −removed`, an arrow folds a space, `+` makes a space), its HEAP
+  every agent and command of every space (space name first), and its last line
+  `@` with every repo's marks added up. `d diff` switches it to the diff view:
+  the spaces with changes and their files, the picked file's diff, and a
+  commit box for that file's repo. A small `w` box next to `d diff` wraps long
+  diff lines to the stick (off: they scroll sideways). Under it `.rodata`
+  (other machines, `Add a machine`, `+`) and Settings / Keys / Commands with
+  their `^b` keys.
 - **space:** the terminal fills the rest. The side column has STACK (every
   space from `0x01` down, a white `◂BP` on the one you work in, `@machine`,
   FAULT, `◆n`, `+n`, and on its label row `^b w`, a `/ rg-fzf` button drawn
@@ -69,13 +71,14 @@ Neovim theme.
   commands, the oldest at the bottom), `.rodata`, GIT (`repo · branch`,
   marks, changed files), HUNK, LANG and the keys row, which never gets cut
   off; lists that don't fit end in `+n more`.
-- **The peek strip** (block `ram-peek`, space level only), under the
-  terminal and as tall as the side column from the line over `.rodata` down,
-  so its top is on that line: a box for SP's tab (`SP▸`, the space and tab,
-  what runs there, its state, and as many of its last lines as fit; a red
-  border while an agent there needs you), and under a review opened from the
-  space level a box for where you came from (`↩`) on its left. No box repeats
-  the tab you're on or another box; with nothing to show it hides.
+- **The peek strip** (block `ram-peek`, space level only), under the terminal
+  and as tall as the side column from the line over `.rodata` down, so its top
+  is on that line: a box for SP's tab (`SP▸`, the space and tab, what runs
+  there, its state, and as many of its last lines as fit; a red border while
+  an agent there needs you), and under a review opened from the space level a
+  box for where you came from (`↩`) on its left. No box repeats the tab you're
+  on or another box; with nothing to show, or with `P` off, it hides. While
+  the side column is hidden it keeps the height it had.
 - **HUNK** (space level, with a repo, between GIT and LANG): `HUNK` and how
   many (its `^b r` key where it fits) with a `+`, then one line per review
   RAM opened in this space: `◆` (amber for the one shown), what it shows,
@@ -103,7 +106,8 @@ Neovim theme.
 - **The key bar:** `ctrl-b` opens a full-width bar on the bottom edge,
   `popover` background, 1px amber top border, a `^b` badge and "then a key ·
   Esc cancels", then the keys grouped as tabs, spaces, panes, agents, git,
-  search, RAM (only while RAM shows) and app.
+  search, RAM (only while RAM shows; its `P` reads `sticks` in meta and `peek`
+  in the space level) and app.
 
 **How it behaves:**
 
@@ -142,12 +146,13 @@ Neovim theme.
 - `e` (`^b e` or its square, off by default): off, a tool opened from meta
   shows in meta's terminal (SP moves onto it and back when you quit it); on,
   the tools and `^b I` from meta go into the space level.
-- More keys: `^b r` hunk (the space's last review for its repo, else the
-  menu; on a review, back where you came from, and the review stays open),
-  `^b d` the main stick's diff view (from the space level: meta with diff),
-  `^b g` lazygit, `^b /` rg-fzf, `^b P` the peek strip off or on, `^b b` the
-  side column, `^b C` the new-tab menu, `^b <` `>` move the tab, `^b {` `}`
-  move the space.
+- More keys: `^b r` hunk (the space's last review for its repo, else the menu;
+  on a review, back where you came from, and the review stays open), `^b d`
+  the main stick's diff view (from the space level: meta with diff; it shows
+  meta's side column if you hid it), `^b g` lazygit, `^b /` rg-fzf, `^b P`
+  what's under the terminal off or on (the sticks in meta, the peek strip in
+  the space level), `^b b` the side column (each level keeps its own), `^b C`
+  the new-tab menu, `^b <` `>` move the tab, `^b {` `}` move the space.
 - `^b w` navigate mode, each move shown at once: the bar shows one row
   (`navigate`, the space's name, `@machine`, `i of n`, `tab n` and its name,
   `i of n`); `j`/down and `k`/up the next and previous space, `h`/left and
@@ -214,34 +219,37 @@ Neovim theme.
   hidden). `ctrl-b b` toggles `sidebar`.
 - `mods/ram/` is one mod in roles: none = the strip, which sizes the blocks
   for the level (`layout.resize`, `layout.show`/`hide`, the peek strip's
-  height too), keeps the running commands (`ram.procs`) and follow's return
-  address (`ram.ret`), and is the only copy with the command loop
+  height too), keeps each level's side column shown or hidden (it watches
+  `sidebar`'s `hidden` in `layout()`, since `^b b` is Herdr's
+  `layout.toggle`), keeps the running commands (`ram.procs`) and follow's
+  return address (`ram.ret`), and is the only copy with the command loop
   (`ram.meta|space|hunk|git|rg|follow|enter|bp|peek|changes|zoom|back` from
   `nextCommand()`); `side`; `rams`; `peek`; and the dialogs `hunk-menu`,
-  `lang` and `git-init`. Its mod.json is `{"place": "none", "focusable":
-  true}`, so `pane.go` can give a copy the keyboard (it gets `"focus"` from
-  `nextCommand()`; the side column keeps it, the others hand it back).
-  `main.js` draws the levels; `pointers.js` keeps SP, BP and the other places
-  (shared state, since Herdr shows one tab per space); `procs.js` the running
-  commands (`terminals()`: a shell whose foreground program isn't the shell;
-  their last lines from `hc read`); `gitinit.js` GIT's dialog; `all.js` the
-  main stick; `hunk.js` the reviews (it runs `hunk session list --json` every
-  3 s while a review is open, else every 15 s); `git.js` branch and counts per
-  space (`git status`, `git rev-parse`, `git diff --numstat`, again on
-  `watchFolder` changes and every minute); `model.js` the agents and exit
-  history; `ui.js` the colors and small parts; `langs.js` LANG: the language
-  table (name, GitHub's color, kind, extensions, file names),
-  `git ls-tree -r -l -z --full-tree HEAD` at the repo's top on its machine
-  (again when the branch changes and every minute), the summary and the dialog
-  (role `lang`, modes `list`, `files`, `ext`); `arrow.svg` the frames'
-  arrow head.
+  `lang` and `git-init`. Its mod.json is
+  `{"place": "none", "focusable": true}`, so `pane.go` can give a copy the
+  keyboard (it gets `"focus"` from `nextCommand()`; the side column keeps it,
+  the others hand it back). `main.js` draws the levels; `pointers.js` keeps
+  SP, BP and the other places (shared state, since Herdr shows one tab per
+  space); `procs.js` the running commands (`terminals()`: a shell whose
+  foreground program isn't the shell; their last lines from `hc read`);
+  `gitinit.js` GIT's dialog; `all.js` the main stick; `hunk.js` the reviews
+  (it runs `hunk session list --json` every 3 s while a review is open, else
+  every 15 s); `git.js` branch and counts per space (`git status`,
+  `git rev-parse`, `git diff --numstat`, again on `watchFolder` changes and
+  every minute); `model.js` the agents and exit history; `ui.js` the colors
+  and small parts; `langs.js` LANG: the language table (name, GitHub's color,
+  kind, extensions, file names), `git ls-tree -r -l -z --full-tree HEAD` at
+  the repo's top on its machine (again when the branch changes and every
+  minute), the summary and the dialog (role `lang`, modes `list`, `files`,
+  `ext`); `arrow.svg` the frames' arrow head.
 - Shared state: `ram.zoom` (meta or not), `ram.sp` (SP: space, tab, pane),
   `ram.bp` (each space's BP tab), `ram.frame` (the space you work in),
   `ram.came` (where you were when a tool's tab showed), `ram.goto` (what the
-  next level change shows), `ram.ret` (follow's return address),
-  `ram.enter` (`e`), `ram.peek` (`P`), `ram.peek.h` (the peek strip's
-  height), `ram.procs` (the running commands), `ram.side` (dragged widths),
-  `ram.all.mode`, `ram.all.wrap`, `ram.follow`, `ram.opening`,
+  next level change shows), `ram.ret` (follow's return address), `ram.enter`
+  (`e`), `ram.peek` (the space level's `P`), `ram.sticks` (meta's `P`),
+  `ram.peek.h` (the peek strip's height), `ram.procs` (the running commands),
+  `ram.side` (dragged widths), `ram.side.hidden` (where you hid the side
+  column), `ram.all.mode`, `ram.all.wrap`, `ram.follow`, `ram.opening`,
   `ram.tool.open` (what GIT's dialog picked), `ram.git.again` (a folder git
   init made a repo), `ram.hunk.*`, `ram.lang.include` (what else LANG counts:
   language names and `.ext`s), and `navigate.space` (`{id, at}`, set by the
@@ -346,6 +354,14 @@ renamed. `install.sh` does all of it and backs up what it replaces.
 - Herdr shows one tab per space, so RAM keeps its pointers itself (`ram.sp`,
   `ram.bp`, shared) and shows a level's own place again when the level
   changes; until that place shows, nothing is taken for it.
+- `^b b` and the `b` square are Herdr's `layout.toggle:sidebar`, so RAM learns
+  of a show or hide from the layout and keeps it for the level shown. On a
+  level change, one it hasn't seen yet belongs to the level being left, and
+  RAM's own show or hide for the new level (waited for, up to 2 s) never
+  counts as the person's; otherwise one level's setting leaks into the other.
+- A hidden block's copy keeps running, timers too: the sticks' copy reads
+  nothing while they're hidden, and the side column's doesn't share the peek
+  strip's height while it's hidden.
 - A command shows once Herdr's terminal list says a shell's foreground
   program isn't the shell, so one that starts and ends between two lists
   never shows. Herdr keeps "done, unseen" only for agents; RAM keeps the
@@ -365,6 +381,10 @@ renamed. `install.sh` does all of it and backs up what it replaces.
   back to its own tab.
 - In the space level the peek strip shows SP's tab, its top on the line over
   `.rodata`, with as many of its last lines as fit; `P` hides it.
+- `^b b` in the space level hides its side column there only: `^b m` still
+  shows the main stick, and `^b i` finds it hidden again. `P` in meta hides
+  the sticks and gives the terminal their room; `^b d` brings meta's side
+  column back.
 - With follow on, an agent that asks takes SP there and `RET▸` marks where it
   was; answering takes SP back.
 - `^b r` in a repo opens the review menu, then a review in a tab of its own,
