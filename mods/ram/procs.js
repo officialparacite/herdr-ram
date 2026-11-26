@@ -17,7 +17,7 @@ export const PROCS = "ram.procs";
 const TOOL_LABELS = ["ram.lazygit", "ram.rg", "ram.hunk"];
 // Programs that wait for you rather than work: by Herdr's program key, or the
 // command's own name.
-export const WAITING = new Set(["nvim", "vim", "hx", "emacs", "nano", "micro", "lazygit", "less", "htop", "tmux", "ssh",
+export const WAITING = new Set(["nvim", "vim", "hx", "emacs", "nano", "micro", "fresh", "lazygit", "less", "htop", "tmux", "ssh",
   "psql", "mysql", "sqlite3", "redis-cli", "mongosh", "ghci", "iex", "erl", "irb", "fzf", "hunk", "rg-fzf", "watch",
   "yazi", "ranger", "lf", "nnn", "k9s"]);
 // Interpreters: a REPL when they run with nothing after them.

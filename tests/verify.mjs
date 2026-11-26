@@ -2277,7 +2277,7 @@ console.log("PASS: RET: while follow is away, a dim RET\u25b8 marks its return a
   assert.equal(c(cargo, ["cargo"], { status: "working" }), null, "a terminal reporting a status is an agent's");
   assert.equal(c(cargo, ["cargo"], { parent: "t1" }), null, "a sub-agent");
   assert.equal(c(cargo, ["cargo"], { labels: { "ram.lazygit": "/r" } }), null, "a tool's tab");
-  for (const [key, argv] of [["nvim", ["nvim", "x"]], ["lazygit", ["lazygit"]], ["less", ["less", "f"]], ["htop", ["top"]], ["ssh", ["ssh", "pc"]], ["program", ["fzf"]], ["program", ["hunk", "diff"]]])
+  for (const [key, argv] of [["nvim", ["nvim", "x"]], ["program", ["fresh", "x"]], ["lazygit", ["lazygit"]], ["less", ["less", "f"]], ["htop", ["top"]], ["ssh", ["ssh", "pc"]], ["program", ["fzf"]], ["program", ["hunk", "diff"]]])
     assert.equal(c({ key, name: key }, argv), null, `${argv[0]} waits for you`);
   assert.equal(c({ key: "python", name: "Python" }, ["python3"]), null, "a REPL");
   assert.deepEqual(c({ key: "python", name: "Python" }, ["python3", "x.py"]), { pid: 1, name: "Python" }, "a script runs");

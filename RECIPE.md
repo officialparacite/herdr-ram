@@ -306,28 +306,65 @@ Neovim theme.
 This branch is the owner's exact setup for the owner's own machines (the
 `main` branch is the shared package). Here the owner's choice replaces Herdr's
 usual rules for someone else's layout: the keymap is replaced, not merged, and
-no keybind of the old one is kept; older copies of these mods are replaced, not
-renamed. `install.sh` does all of it and backs up what it replaces.
+no keybind of the old one is kept; older copies of these mods are replaced,
+not renamed. Everything replaced goes first to
+`~/.config/herdr-app/.backup-ram-<time>/` (one `<time>` for the whole install,
+`date +%Y%m%d%H%M%S`).
 
 1. Read every file first. Tell the person: RAM runs `git` (status, diff) in
-   their spaces' repos and, only when they press Commit or Create, `git add -A`
-   and `git commit`, or `git init`; it runs `hunk session list`, `hc` and
-   `herdr-app do`, and reads lazygit's `state.yml`; nothing reaches the
-   network. lazygit and hunk need to be installed for `^b g` and the reviews,
-   and rg-fzf (with rg, fzf, bat, jq) for `^b /`.
-2. Run `./install.sh` from the clone, with `--nvim` if the person wants the
-   Neovim files (only on LazyVim; on Omarchy it skips `colorscheme.lua` and
-   `aether.lua`). It copies the layout, theme and mods (each moved into `mods/`
-   whole), replaces `keys.json` (without `ctrl-[` off macOS), checks each mod
-   and switches to RAM. Replaced files go to
-   `~/.config/herdr-app/.backup-ram-<time>/`.
-3. If `~/.config/herdr-app` is a git repo with an allowlist `.gitignore`, add
+   their spaces' repos and, only when they press Commit or Create,
+   `git add -A` and `git commit`, or `git init`; it runs `hunk session list`,
+   `hc` and `herdr-app do`, and reads lazygit's `state.yml`; nothing reaches
+   the network.
+2. Install the tools and the editor the person picks (Watch out: the tools,
+   the editor).
+3. Copy `layouts/ram.json`, `layouts/ram.svg` and `themes/ram.json` to the
+   same paths in `~/.config/herdr-app`. Then each of `mods/ram`,
+   `mods/ram-menu`, `mods/prefix`, `mods/text-bigger` and `mods/text-smaller`:
+   copy it next to `mods/` (without `gpui-kit.d.ts`, `herdr.d.ts` and
+   `jsconfig.json`), move the old one into the backup, then move the new one
+   in whole.
+4. Then replace `keys.json` with this one, the old one into the backup. Off
+   macOS, drop its `terminal` key `ctrl-[` (only macOS needs it).
+5. With Neovim on LazyVim: copy `nvim/`'s files to the same paths under
+   `~/.config/nvim`, keeping any file they change as `<file>.bak-<time>`. On
+   Omarchy leave out `lua/plugins/colorscheme.lua` and
+   `lua/plugins/aether.lua`, which its theme brings.
+6. `herdr-app check` each mod; when they all pass,
+   `herdr-app do layout.switch '{"name":"ram"}'`.
+7. If `~/.config/herdr-app` is a git repo with an allowlist `.gitignore`, add
    `!/mods/<name>/` for each new mod and commit only the new files.
-4. Confirm `herdr-app status` shows no errors with `ram` shown, and that
+8. Confirm `herdr-app status` shows no errors with `ram` shown, and that
    `RAM_HOME=~/.config/herdr-app node tests/verify.mjs` passes.
 
 **Watch out:**
 
+- The tools: adding RAM installs everything it uses, so every key works from
+  the start. Check what's there first (`command -v`, `fzf --version`), tell
+  the person what's missing and how you'll install it, ask once, then install
+  it the device's own way. RAM needs git, lazygit (`^b g`), hunk (`^b r`),
+  rg-fzf (`^b /`) and rg-fzf's ripgrep, fzf 0.45 or newer, bat and jq.
+  Homebrew, where there is one, has all of them but rg-fzf:
+  `brew install git lazygit hunk ripgrep fzf bat jq`. Without it, hunk comes
+  from its installer (`curl -fsSL https://hunk.dev/install.sh | sh`); Debian
+  and Ubuntu call bat `batcat` (link it as `bat`), and when their fzf is older
+  than 0.45, use fzf's own install (https://github.com/junegunn/fzf). rg-fzf
+  isn't packaged: clone https://github.com/officialparacite/rg-fzf to a
+  lasting folder (`~/.local/share/rg-fzf`) and link its `rg-fzf.sh` as
+  `rg-fzf` in a folder on the login shell's PATH, since RAM starts it from a
+  login shell.
+- The editor: LANG and rg-fzf open files in `$EDITOR`, so ask the person which
+  editor they want: Neovim, set up with LazyVim and RAM's theme (`nvim/`), or
+  Fresh (https://github.com/sinelaw/fresh), which works like a desktop editor
+  and has no learning curve. Install it if it's missing (Homebrew's `neovim`
+  or `fresh-editor`; else the system's Neovim package, or Fresh's installer:
+  `curl -fsSL https://raw.githubusercontent.com/sinelaw/fresh/refs/heads/master/scripts/install.sh | sh`).
+  Make it `EDITOR` in the login shell's startup file, asking first when
+  `EDITOR` already names another editor. For Neovim with no `~/.config/nvim`
+  yet, start it from LazyVim's starter
+  (`git clone https://github.com/LazyVim/starter ~/.config/nvim`, then delete
+  its `.git`) before the theme files go in; a config that isn't LazyVim (no
+  `lua/config/lazy.lua`) keeps its own look, without RAM's theme files.
 - Never test by driving a window someone is using: `^b` keys act on the
   focused pane, tab and space, and RAM's own resizes move their columns.
   `tests/verify.mjs` checks the mods with a stand-in for Herdr instead.
@@ -374,6 +411,9 @@ renamed. `install.sh` does all of it and backs up what it replaces.
 
 - Every mod passes `herdr-app check`, `node tests/verify.mjs` passes, and
   `herdr-app status` shows no errors with `ram` shown.
+- `command -v git lazygit hunk rg-fzf rg fzf bat jq` finds each one,
+  `fzf --version` is 0.45 or newer, and `$EDITOR` in a new login shell is the
+  editor the person picked (`nvim` or `fresh`).
 - `^b m` shows every space as a stick under the terminal with the main stick
   beside it, `SP▸` on the tab meta shows and a `BP▸` on each stick; `^b i`
   gives the terminal the room at the bright BP, with STACK, HEAP, `.rodata`,

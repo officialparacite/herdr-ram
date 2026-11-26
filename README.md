@@ -1,9 +1,9 @@
 # RAM (private: my own setup)
 
-This is the `private` branch: my exact setup, for my own machines. Its
-`install.sh` replaces the keymap, so none of the machine's old keybinds stay.
-The `main` branch is the package for other people: it adds only the keys RAM
-needs, next to theirs, and follows Herdr's rules for shared layouts.
+This is the `private` branch: my exact setup, for my own machines. Installing
+it replaces the keymap, so none of the machine's old keybinds stay. The `main`
+branch is the package for other people: it adds only the keys RAM needs, next
+to theirs, and follows Herdr's rules for shared layouts.
 
 A Herdr layout for working on many projects at once. Each space is one project
 (a repo with its agents and terminals), drawn as a stick of RAM, and all of them
@@ -48,43 +48,42 @@ in every layout, and an optional Neovim theme follows the layout.
 | `mods/prefix/` | the `ctrl-b` key bar, in every layout (with `^b w` navigate mode, `^b g` lazygit and `^b /` rg-fzf) |
 | `mods/text-bigger/`, `mods/text-smaller/` | ⌘+ and ⌘−: the terminals' text a size bigger or smaller |
 | `keys.json` | my whole keymap: the `ctrl-b` keys, ⌘+/⌘−, and my terminal keys |
-| `install.sh` | puts all of it in place on a machine, backing up what it replaces |
 | `nvim/` | my Herdr colorschemes (`herdr`, `herdr-ram`, `herdr-traveler`, `herdr-night-city`) and the switch that follows the layout (LazyVim) |
 | `tests/` | `verify.mjs`, checks that need no Herdr window, and `mutate.py` |
 | `preview.png` | a picture of the meta level (the gallery shows it) |
 | `RECIPE.md` | the brief to build RAM from scratch; an agent installs from it |
 
-## Needs
+## What it installs
 
-- The [Herdr app](https://herdr.dev) 0.1.15 or later, with its herdr-core.
-  Tested on 0.1.15 on macOS.
-- git. [lazygit](https://github.com/jesseduffield/lazygit) for `^b g` and the GIT
-  lines, [hunk](https://hunk.dev) for the reviews (`^b r`, HUNK):
-  `brew install lazygit hunk`.
+Adding RAM installs everything it uses that isn't there yet, the way your
+system installs things (Homebrew, apt, pacman and so on). The agent says what
+it will install and asks once first.
+
+- git, [lazygit](https://github.com/jesseduffield/lazygit) for `^b g` and the
+  GIT lines, and [hunk](https://hunk.dev) for the reviews (`^b r`, HUNK).
 - [rg-fzf](https://github.com/officialparacite/rg-fzf) for `^b /` and the space
-  level's `rg-fzf` button (it needs rg, fzf, bat and jq).
-- Optional: Neovim with LazyVim for the theme.
+  level's `rg-fzf` button, with what it needs: ripgrep, fzf, bat and jq.
+- An editor for the files LANG and rg-fzf open, set as your `$EDITOR`. You
+  pick it: Neovim, set up with LazyVim and RAM's theme, or
+  [Fresh](https://github.com/sinelaw/fresh), which works like a desktop editor
+  and has no learning curve.
+
+It needs the [Herdr app](https://herdr.dev) 0.1.15 or later, with its
+herdr-core, and an agent in a Herdr terminal. Tested on 0.1.15 on macOS.
 
 ## Install on one of my machines
 
-```sh
-git clone -b private git@github.com:officialparacite/herdr-ram.git
-cd herdr-ram
-./install.sh --nvim      # without --nvim it leaves ~/.config/nvim alone
-```
+In a Herdr terminal, ask your agent:
 
-`install.sh` copies the layout, theme and mods into `~/.config/herdr-app`
-(`HERDR_APP_HOME` for another home), replaces `keys.json` with mine, runs
-`herdr-app check` on each mod and switches the window to RAM (`--no-switch`
-to skip that). Everything it replaces goes to
+> Read ~/.config/herdr-app/AGENTS.md, then add this layout: https://github.com/officialparacite/herdr-ram/tree/private
+
+It installs the tools above, copies the layout, theme and mods into
+`~/.config/herdr-app`, replaces `keys.json` with mine, checks each mod and
+switches the window to RAM. Everything it replaces goes to
 `~/.config/herdr-app/.backup-ram-<time>/` first, and changed Neovim files are
-kept as `<file>.bak-<time>`. Each mod is copied next to `mods/` and then moved
-in whole, because Herdr docks a mod folder it sees without its `mod.json` into
-the layout on screen. On Linux it leaves out the `ctrl-[` key (only macOS needs
-it); on Omarchy it skips `colorscheme.lua` and `aether.lua`, which Omarchy's
-theme provides.
+kept as `<file>.bak-<time>`. RECIPE.md has the steps it follows.
 
-To update a machine: `git pull` in the clone, then `./install.sh` again.
+To update a machine, ask it the same again.
 
 `ctrl-b` then `space` switches layouts. `ctrl-alt-shift-escape` always goes back
 to Herdr's `main` layout and default keys.
@@ -236,9 +235,9 @@ From meta they show in meta's terminal unless `e` is on.
 | `lua/plugins/colorscheme.lua` | makes `herdr` the usual colorscheme (plain LazyVim only) |
 | `lua/plugins/aether.lua` | aether.nvim (v3), which draws the schemes (plain LazyVim only) |
 
-`./install.sh --nvim` copies them to the same paths under `~/.config/nvim`.
-Its `herdr_theme.lua` maps all three of my layouts (`traveler`, `night-city`,
-`ram`) to their schemes, which are all here.
+When you pick Neovim, the install copies them to the same paths under
+`~/.config/nvim`. Its `herdr_theme.lua` maps all three of my layouts
+(`traveler`, `night-city`, `ram`) to their schemes, which are all here.
 
 ## Tests
 
