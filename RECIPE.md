@@ -3,12 +3,12 @@
 The owner's exact setup; the `main` branch is the package to share.
 
 Work on many projects at once and see all of them on one screen. Each space is
-one project (a repo with its agents and terminals), drawn as a stick of RAM. The
-meta view lines every space up below your terminal, so one glance shows which
-agents are working, which need you (in red), what's running and what changed in
-each repo. Click a stick to jump to that space; the space view gives the one you
-work in the room. Comes with lazygit, rg-fzf, hunk, a ctrl-b key bar and a
-Neovim theme.
+one project (a repo with its agents and terminals), drawn as a stick of RAM.
+The meta view lines every space up below your terminal, so one glance shows
+which agents are working, which need you (in red), what's running and what
+changed in each repo. Click a stick to jump to that space; the space view
+gives the one you work in the room. Comes with lazygit, hunk, a search window,
+a ctrl-b key bar and a Neovim theme.
 
 ![RAM](preview.png)
 
@@ -66,11 +66,11 @@ Neovim theme.
   their `^b` keys.
 - **space:** the terminal fills the rest. The side column has STACK (every
   space from `0x01` down, a white `◂BP` on the one you work in, `@machine`,
-  FAULT, `◆n`, `+n`, and on its label row `^b w`, a `/ rg-fzf` button drawn
-  as meta's `d diff`, and `+` for a new space), HEAP (this space's agents and
-  commands, the oldest at the bottom), `.rodata`, GIT (`repo · branch`,
-  marks, changed files), HUNK, LANG and the keys row, which never gets cut
-  off; lists that don't fit end in `+n more`.
+  FAULT, `◆n`, `+n`, and on its label row `^b w`, a `/ search` button drawn as
+  meta's `d diff`, and `+` for a new space), HEAP (this space's agents and
+  commands, the oldest at the bottom), `.rodata`, GIT (`repo · branch`, marks,
+  changed files), HUNK, LANG and the keys row, which never gets cut off; lists
+  that don't fit end in `+n more`.
 - **The peek strip** (block `ram-peek`, space level only), under the terminal
   and as tall as the side column from the line over `.rodata` down, so its top
   is on that line: a box for SP's tab (`SP▸`, the space and tab, what runs
@@ -100,6 +100,23 @@ Neovim theme.
   hint names git's default, from `git var GIT_DEFAULT_BRANCH`), `Create a repo
   here` and `Open a recent repo ▸` (lazygit's recent repos that still are
   repos, this folder left out), and git's own error when `git init` fails.
+- **The search window** (a dialog 0.9 x 0.86 of the window, `popover`
+  background): a row with `SEARCH` (cyan), the space, a scope button
+  (`Alt-S repo` or `folder`) and the folder, the count (`123 lines`,
+  `20,000+ lines` at the cap) and `Alt-/ keys` / `Esc close`; the query box
+  (amber border) with its mode button (`Ctrl-F Content (regex)`,
+  `Content (pcre2)` or `Filename (fuzzy)`), an amber cursor and a `✕`; the
+  option buttons (`Alt-P pcre2`, `Alt-V invert`, `Alt-I hidden`,
+  `Alt-U one per file`, then `Ctrl-P preview`, `Alt-W wrap`, `Alt-N numbers`),
+  lit amber while on; the results (a pick box, the folder dim and the file's
+  name, `:line:column`, the line without its indent and its matches in amber,
+  the cursor's row lit) beside the preview (55% to start; the divider between
+  them drags from 20% to 80%), which shows the file in bat's colors with line
+  numbers, the match's line lit amber; and the action buttons (`Enter files`,
+  `Ctrl-O lines`, `Alt-Enter JSON`, `Alt-C copy`, `Ctrl-E edit`, `n picked`,
+  `Tab pick ↓`, `Shift-Tab pick ↑`, `Ctrl-A all`, `Ctrl-Z none`). Keys are
+  written in words, as rg-fzf's help writes them. Only the rows and lines that
+  fit are drawn.
 - **The terminal menu** (right-click on a terminal, mod `ram-menu`): Copy and
   Paste, then Herdr's own items (split right and down, zoom, where
   right-clicks go, back to the parent, close pane), each with its key.
@@ -123,11 +140,11 @@ Neovim theme.
   level's place, and nothing is taken for it until that has shown. SP is the
   tab meta shows: clicks in meta, `^b w` there and follow move it. A space's
   BP is the tab the space level shows in it: tab changes in the space level
-  move it, and the space you're in there is the one you work in (its BP is
-  the bright one). `^b I`, or a click on `SP▸`, moves the bright BP to SP's
-  tab (from meta it shows there only with `e` on). A tool's tab (lazygit,
-  rg-fzf, a review) is never a BP: when it closes, RAM goes back to where you
-  were when it showed, in that level.
+  move it, and the space you're in there is the one you work in (its BP is the
+  bright one). `^b I`, or a click on `SP▸`, moves the bright BP to SP's tab
+  (from meta it shows there only with `e` on). A tool's tab (lazygit, a
+  review) is never a BP: when it closes, RAM goes back to where you were when
+  it showed, in that level.
 - Clicking a space, tab, frame, block or agent shows it: in meta that moves
   SP and you stay in meta; in the space level it moves the BP. A space alone
   (a stick's name, a STACK row) shows its BP tab. A running command's row or
@@ -149,7 +166,7 @@ Neovim theme.
 - More keys: `^b r` hunk (the space's last review for its repo, else the menu;
   on a review, back where you came from, and the review stays open), `^b d`
   the main stick's diff view (from the space level: meta with diff; it shows
-  meta's side column if you hid it), `^b g` lazygit, `^b /` rg-fzf, `^b P`
+  meta's side column if you hid it), `^b g` lazygit, `^b /` search, `^b P`
   what's under the terminal off or on (the sticks in meta, the peek strip in
   the space level), `^b b` the side column (each level keeps its own), `^b C`
   the new-tab menu, `^b <` `>` move the tab, `^b {` `}` move the space.
@@ -170,14 +187,32 @@ Neovim theme.
   programs that wait for you (editors, pagers, lazygit, top, ssh, tmux,
   database shells, fzf, hunk, watch) and a bare interpreter (a REPL) aren't
   commands. Commands never take part in follow, faults or `agent.next`.
-- rg-fzf: the `/ rg-fzf` button or `^b /` opens it in a tab named
-  `rg-fzf <folder>` at the space's repo (no repo: its folder), or shows the
-  one open there. The tab runs `sh -c` with a short script: it labels its
-  terminal `ram.rg=$PWD`, runs `out=$(rg-fzf)`, removes the label, closes the
-  tab when nothing was printed and rg-fzf exited 0 (Esc), else prints the
-  output and `exec`s the user's shell (`$SHELL -il`), so the tab carries on as
-  a plain one. While labelled it's a tool's tab (the button lit, its chip
-  cyan, never a BP), and when it closes RAM goes back to where you came from.
+- Search: `^b /` or the `/ search` button opens the window for the terminal
+  you're in (its folder, and its repo's top from
+  `git rev-parse --show-toplevel`; with no terminal, the space's repo, and
+  picks are copied). Each change of the query or an option starts a run:
+  `sh -c` with a script that stops the run before (`kill` on its process
+  group) and removes its folder, makes one with `mktemp -d` in `$TMPDIR`, and
+  runs ripgrep in the background with rg-fzf's options (`--ignore-case`, the
+  default engine or `--engine pcre2`,
+  `--max-columns 500 --max-columns-preview`, `--hidden`, `--invert-match`,
+  `--max-count 1`; an empty query lists the files with `rg --files`; content
+  mode's file name query picks the files searched and filename mode picks the
+  results by file name, both with `fzf --filter`), writing 500-line files the
+  window reads every 40 ms, up to 20,000 lines. The last results stay until
+  the new ones come, and only the newest query runs. The preview runs
+  `bat --line-range` around the line. Enter, `Ctrl-O` and `Alt-Enter` put the
+  files (once each, sorted, quoted, on one line), the lines
+  (`file:line:column:text`) or rg-fzf's JSON (`rg --json` for the whole lines
+  and what matched) on the clipboard, focus the terminal you came from and
+  paste (`terminal.paste`), then close; paths are relative to that terminal's
+  folder when they're under it. `Alt-C` copies instead. `Ctrl-E` or a
+  double-click runs `exec sh -c 'exec ${EDITOR:-vim} "+$1" "$2"'` in a new
+  tab. Closing stops the run and removes its folder. Each space keeps its
+  query and options (`ram.search.last`), and a second `^b /` closes the first
+  window (`ram.search.top`). `ram-search` (paths, or a list on stdin) opens
+  the window in a tab of its own (`tab.new` with `mod: ram`) for those files,
+  and a pick closes that tab.
 - lazygit: a GIT line, a stick's git line or `^b g` opens `lazygit <folder>`
   in a tab, one per repo, for the repo the space is named after (the repo top
   of its first terminal's folder; GIT, HUNK, LANG and the stick's git line use
@@ -225,23 +260,26 @@ Neovim theme.
   return address (`ram.ret`), and is the only copy with the command loop
   (`ram.meta|space|hunk|git|rg|follow|enter|bp|peek|changes|zoom|back` from
   `nextCommand()`); `side`; `rams`; `peek`; and the dialogs `hunk-menu`,
-  `lang` and `git-init`. Its mod.json is
+  `lang`, `git-init` and `search` (also `ram-search`'s tab). Its mod.json is
   `{"place": "none", "focusable": true}`, so `pane.go` can give a copy the
   keyboard (it gets `"focus"` from `nextCommand()`; the side column keeps it,
   the others hand it back). `main.js` draws the levels; `pointers.js` keeps
   SP, BP and the other places (shared state, since Herdr shows one tab per
   space); `procs.js` the running commands (`terminals()`: a shell whose
   foreground program isn't the shell; their last lines from `hc read`);
-  `gitinit.js` GIT's dialog; `all.js` the main stick; `hunk.js` the reviews
-  (it runs `hunk session list --json` every 3 s while a review is open, else
-  every 15 s); `git.js` branch and counts per space (`git status`,
-  `git rev-parse`, `git diff --numstat`, again on `watchFolder` changes and
-  every minute); `model.js` the agents and exit history; `ui.js` the colors
-  and small parts; `langs.js` LANG: the language table (name, GitHub's color,
-  kind, extensions, file names), `git ls-tree -r -l -z --full-tree HEAD` at
-  the repo's top on its machine (again when the branch changes and every
-  minute), the summary and the dialog (role `lang`, modes `list`, `files`,
-  `ext`); `arrow.svg` the frames' arrow head.
+  `gitinit.js` GIT's dialog; `search.js` the search window (its run script,
+  the preview, the keys; Tab and Shift-Tab bound with `cx.bind_keys` in its
+  own key context); `ram-search` the shell entry for a file list; `all.js` the
+  main stick; `hunk.js` the reviews (it runs `hunk session list --json` every
+  3 s while a review is open, else every 15 s); `git.js` branch and counts per
+  space (`git status`, `git rev-parse`, `git diff --numstat`, again on
+  `watchFolder` changes and every minute); `model.js` the agents and exit
+  history; `ui.js` the colors and small parts; `langs.js` LANG: the language
+  table (name, GitHub's color, kind, extensions, file names),
+  `git ls-tree -r -l -z --full-tree HEAD` at the repo's top on its machine
+  (again when the branch changes and every minute), the summary and the dialog
+  (role `lang`, modes `list`, `files`, `ext`); `arrow.svg` the frames' arrow
+  head.
 - Shared state: `ram.zoom` (meta or not), `ram.sp` (SP: space, tab, pane),
   `ram.bp` (each space's BP tab), `ram.frame` (the space you work in),
   `ram.came` (where you were when a tool's tab showed), `ram.goto` (what the
@@ -252,23 +290,25 @@ Neovim theme.
   column), `ram.all.mode`, `ram.all.wrap`, `ram.follow`, `ram.opening`,
   `ram.tool.open` (what GIT's dialog picked), `ram.git.again` (a folder git
   init made a repo), `ram.hunk.*`, `ram.lang.include` (what else LANG counts:
-  language names and `.ext`s), and `navigate.space` (`{id, at}`, set by the
-  key bar).
-- Commands: `tab.select`, `space.select`, `pane.focus`, `pane.go`,
-  `tab.move`, `space.move`, `tab.close`, `tab.rename`, `space.rename`,
-  `space.new`, `tab.new` (a language's file; GIT's dialog outside RAM),
+  language names and `.ext`s), `ram.search.last` (each space's last search,
+  and the window's look and divider), `ram.search.top` (the newest search
+  window), and `navigate.space` (`{id, at}`, set by the key bar).
+- Commands: `tab.select`, `space.select`, `pane.focus`, `pane.go`, `tab.move`,
+  `space.move`, `tab.close`, `tab.rename`, `space.rename`, `space.new`,
+  `tab.new` (a language's file, search's editor; GIT's dialog outside RAM),
   `agent.focus`, `terminal.peek`, `terminal.copy`, `terminal.paste`,
-  `layout.resize`, `layout.show`, `layout.hide`, `layout.toggle`, `mod.open`
-  (machine-add), `app.settings`, `app.help` and `app.palette` (Settings, Keys
-  and Commands); `setAgentOrder()` on every render. lazygit, rg-fzf and hunk
-  tabs are made with `herdr-app do tab.new --space --name --folder --argv
-  '["exec", ...]'` (so quitting the program closes its tab), then labelled
-  with `hc label` (rg-fzf's script labels its own). It also runs `hc machine
-  ls --json` every 15 s, `hc ls --all --json`, `hc read` (the peek strip, and
-  the running commands' last lines every 2 s), and for GIT's dialog `git var
-  GIT_DEFAULT_BRANCH`, `lazygit --print-config-dir` (then it reads lazygit's
-  `state.yml`) and, when you press Create, `git init`. No mod opens a network
-  connection.
+  `pane.close`, `layout.resize`, `layout.show`, `layout.hide`,
+  `layout.toggle`, `mod.open` (machine-add), `app.settings`, `app.help` and
+  `app.palette` (Settings, Keys and Commands); `setAgentOrder()` on every
+  render. lazygit and hunk tabs are made with
+  `herdr-app do tab.new --space --name --folder --argv '["exec", ...]'` (so
+  quitting the program closes its tab), then labelled with `hc label`. It also
+  runs `hc machine ls --json` every 15 s, `hc ls --all --json`, `hc read` (the
+  peek strip, and the running commands' last lines every 2 s), and for GIT's
+  dialog `git var GIT_DEFAULT_BRANCH`, `lazygit --print-config-dir` (then it
+  reads lazygit's `state.yml`) and, when you press Create, `git init`. Search
+  runs `sh -c` (ripgrep, fzf, awk), `bat`, `rg --json` and `cat`, `kill` and
+  `rm` on its own folders in `$TMPDIR`. No mod opens a network connection.
 - `mods/ram-menu`: the terminals' right-click menu, named by the layout
   root's `terminal_menu`. Herdr opens it as a popup with `{tab: "pane",
   target: {pane, terminal}}` (its mod.json makes it 250x300). Copy and Paste
@@ -276,8 +316,8 @@ Neovim theme.
   `terminal.paste`, then close the menu, since those act on the focused
   terminal; the rest are Herdr's own menu items, each with its key.
 - `mods/prefix` + `keys.json` (the bar's name is `NAME` in its main.js and
-  `BAR` in `mods/ram/ui.js`): `global` binds `ctrl-b` → `mod.open:prefix`
-  and ⌘+/⌘− → `mod.open:text-bigger` / `text-smaller`. The second keys are the
+  `BAR` in `mods/ram/ui.js`): `global` binds `ctrl-b` → `mod.open:prefix` and
+  ⌘+/⌘− → `mod.open:text-bigger` / `text-smaller`. The second keys are the
   `mod:prefix` section, each `prefix.<command>[:<first argument>]`; Herdr runs
   a bound key as that binding, so it reaches the bar's `nextCommand()` as its
   action and never its `on_key_down`. The bar runs it once and closes
@@ -285,9 +325,9 @@ Neovim theme.
   numbers). Extras: `prefix.passthrough` (`hc keys <terminal> ctrl+b`),
   `prefix.worktree` (the shipped `worktree` dialog), `prefix.lazygit`
   (`ram.git` in RAM, else a lazygit tab at the focused terminal's repo),
-  `prefix.rg` (`ram.rg` in RAM, else an rg-fzf tab at that repo or folder,
-  with the same script as RAM's, `RG_TAB`), `prefix.newmenu` (the new-tab
-  menu), `prefix.tab.left` / `tab.right` and `space.earlier` / `space.later`
+  `prefix.rg` (`ram.rg` in RAM, else RAM's search window, mod `ram` role
+  `search`, for the focused terminal), `prefix.newmenu` (the new-tab menu),
+  `prefix.tab.left` / `tab.right` and `space.earlier` / `space.later`
   (`tab.move` / `space.move` one place) and `prefix.navigate`, which maps each
   later action back to its key (`j` is `pane.go:down`). A folder that isn't a
   repo gets RAM's GIT dialog (mod `ram`, role `git-init`) from
@@ -314,8 +354,9 @@ not renamed. Everything replaced goes first to
 1. Read every file first. Tell the person: RAM runs `git` (status, diff) in
    their spaces' repos and, only when they press Commit or Create,
    `git add -A` and `git commit`, or `git init`; it runs `hunk session list`,
-   `hc` and `herdr-app do`, and reads lazygit's `state.yml`; nothing reaches
-   the network.
+   `hc` and `herdr-app do`, and for search ripgrep, fzf and bat (its runs
+   write their results to `$TMPDIR`), and reads lazygit's `state.yml`; nothing
+   reaches the network.
 2. Install the tools and the editor the person picks (Watch out: the tools,
    the editor).
 3. Copy `layouts/ram.json`, `layouts/ram.svg` and `themes/ram.json` to the
@@ -323,7 +364,8 @@ not renamed. Everything replaced goes first to
    `mods/ram-menu`, `mods/prefix`, `mods/text-bigger` and `mods/text-smaller`:
    copy it next to `mods/` (without `gpui-kit.d.ts`, `herdr.d.ts` and
    `jsconfig.json`), move the old one into the backup, then move the new one
-   in whole.
+   in whole. Link `~/.config/herdr-app/mods/ram/ram-search` as `ram-search` in
+   a folder on the login shell's PATH (`~/.local/bin`).
 4. Then replace `keys.json` with this one, the old one into the backup. Off
    macOS, drop its `terminal` key `ctrl-[` (only macOS needs it).
 5. With Neovim on LazyVim: copy `nvim/`'s files to the same paths under
@@ -340,20 +382,15 @@ not renamed. Everything replaced goes first to
 **Watch out:**
 
 - The tools: adding RAM installs everything it uses, so every key works from
-  the start. Check what's there first (`command -v`, `fzf --version`), tell
-  the person what's missing and how you'll install it, ask once, then install
-  it the device's own way. RAM needs git, lazygit (`^b g`), hunk (`^b r`),
-  rg-fzf (`^b /`) and rg-fzf's ripgrep, fzf 0.45 or newer, bat and jq.
-  Homebrew, where there is one, has all of them but rg-fzf:
-  `brew install git lazygit hunk ripgrep fzf bat jq`. Without it, hunk comes
-  from its installer (`curl -fsSL https://hunk.dev/install.sh | sh`); Debian
-  and Ubuntu call bat `batcat` (link it as `bat`), and when their fzf is older
-  than 0.45, use fzf's own install (https://github.com/junegunn/fzf). rg-fzf
-  isn't packaged: clone https://github.com/officialparacite/rg-fzf to a
-  lasting folder (`~/.local/share/rg-fzf`) and link its `rg-fzf.sh` as
-  `rg-fzf` in a folder on the login shell's PATH, since RAM starts it from a
-  login shell.
-- The editor: LANG and rg-fzf open files in `$EDITOR`, so ask the person which
+  the start. Check what's there first (`command -v`), tell the person what's
+  missing and how you'll install it, ask once, then install it the device's
+  own way. RAM needs git, lazygit (`^b g`), hunk (`^b r`) and, for search
+  (`^b /`), ripgrep, fzf and bat. Homebrew, where there is one, has all of
+  them: `brew install git lazygit hunk ripgrep fzf bat`. Without it, hunk
+  comes from its installer (`curl -fsSL https://hunk.dev/install.sh | sh`),
+  and Debian and Ubuntu call bat `batcat` (link it as `bat`). rg-fzf (and the
+  jq it needs) isn't part of RAM any more.
+- The editor: LANG and search open files in `$EDITOR`, so ask the person which
   editor they want: Neovim, set up with LazyVim and RAM's theme (`nvim/`), or
   Fresh (https://github.com/sinelaw/fresh), which works like a desktop editor
   and has no learning curve. Install it if it's missing (Homebrew's `neovim`
@@ -405,15 +442,25 @@ not renamed. Everything replaced goes first to
   commands' own (`ram.procs`).
 - `terminal.copy` and `terminal.paste` act on the focused terminal, and a
   right-click doesn't focus it: the menu focuses the right-clicked pane first.
-- Tested on Herdr 0.1.15 on macOS. Re-check after app updates.
+- Search: `exec` gives a program's output only when it ends, so results stream
+  through files: a run started in the background (every descriptor redirected,
+  so `exec` returns at once; Herdr starts it in a session of its own, so
+  `kill -- -$$` stops all of it) writes chunk files the window polls. macOS's
+  awk cuts a line at its first NUL, so fields are split by `\x1f`. Tab and
+  Shift-Tab never reach a mod's `on_key_down` (the UI kit's root takes them to
+  move focus): bind them with `cx.bind_keys` in a key context of the window's
+  own, on every open (a keys.json reload clears script bindings).
+  `readTextFile` refuses text that isn't UTF-8: read such files with `cat`.
+- Tested on Herdr 0.1.18 on macOS. Re-check after app updates.
 
 **Done when:**
 
-- Every mod passes `herdr-app check`, `node tests/verify.mjs` passes, and
-  `herdr-app status` shows no errors with `ram` shown.
-- `command -v git lazygit hunk rg-fzf rg fzf bat jq` finds each one,
-  `fzf --version` is 0.45 or newer, and `$EDITOR` in a new login shell is the
-  editor the person picked (`nvim` or `fresh`).
+- Every mod passes `herdr-app check`, `node tests/verify.mjs` and
+  `node tests/search-e2e.mjs` pass, and `herdr-app status` shows no errors
+  with `ram` shown.
+- `command -v git lazygit hunk rg fzf bat` finds each one (and `ram-search`
+  once it's linked), and `$EDITOR` in a new login shell is the editor the
+  person picked (`nvim` or `fresh`).
 - `^b m` shows every space as a stick under the terminal with the main stick
   beside it, `SP▸` on the tab meta shows and a `BP▸` on each stick; `^b i`
   gives the terminal the room at the bright BP, with STACK, HEAP, `.rodata`,
@@ -438,8 +485,9 @@ not renamed. Everything replaced goes first to
 - In the space level, LANG (under GIT and HUNK) shows the repo's languages
   with the same shares GitHub would give its committed code; `ext` and a tick
   on YAML makes YAML count; a language's file opens in `$EDITOR`.
-- `^b /` opens rg-fzf at the space's repo; Enter leaves the picked files
-  printed in a shell tab, and Esc closes the tab.
+- `^b /` opens the search window at the space's repo: typing shows the matches
+  as they come, the preview shows the file at the line, Enter puts the picked
+  files at the prompt of the terminal you came from, and Esc closes it.
 - `^b w`, `j` shows the next space at once, with a cyan outline on it while
   navigating; `l` shows its next tab, `L` the pane to the right, and Esc goes
   back to where you started.

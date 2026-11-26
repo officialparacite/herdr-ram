@@ -18,10 +18,13 @@
 //             Under the terminal a strip (role "peek") shows SP's tab; under a
 //             review, where you came from.
 // The level is shared "ram.zoom". Changing it shows that level's place (the
-// map copy's applyLevel()). lazygit, hunk's reviews and rg-fzf open in tabs of
-// their own in the space you work in (its bright BP), for the repo it's named
-// after; from meta they stay in meta unless the e square (ctrl-b e) is on.
-// Roles "hunk-menu", "lang" and "git-init" are dialogs.
+// map copy's applyLevel()). lazygit and hunk's reviews open in tabs of their
+// own in the space you work in (its bright BP), for the repo it's named after;
+// from meta they stay in meta unless the e square (ctrl-b e) is on. Search
+// (ctrl-b /, the space level's / search) is a window over the window
+// (search.js), for the terminal you're in.
+// Roles "hunk-menu", "lang", "git-init" and "search" are dialogs ("search" is
+// also ram-search's tab).
 // The model, exit history and git info are night-city's (model.js, git.js).
 import { View, div, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
@@ -39,6 +42,7 @@ import { AMBER, CYAN, GOLD, GREEN, RED, ROM, ROM_LINE, ROM_BG, ROM_HOVER, U, CEL
 import { SP, BP, FRAME, CAME, GOTO, RET, live, spPlace, bpTab, frameSpace, bpPlace, show, goTo } from "./pointers.js";
 import { PROCS, Tail, track, sameProcs, procRows } from "./procs.js";
 import { GitInit, TOOL_OPEN } from "./gitinit.js";
+import { SearchView, openSearch } from "./search.js";
 
 // The space sticks (regions) in meta, under the terminal.
 const HEADER_H = 19 * U, LABELS_H = 13 * U, FRAME_H = 18 * U, BOTTOM_H = 21 * U, PINS_H = 6 * U, HEAP_H = 20 * U;
@@ -209,37 +213,20 @@ const blockText = a => a.status === "dead" ? "freed" : a.status === "unavailable
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
 // The tools RAM opens in a tab of their own, in the space you work in, at the
-// repo it's named after (else that folder): lazygit (GIT's click, ctrl-b g),
-// rg-fzf (the space level's / rg-fzf button, ctrl-b /) and hunk's reviews
-// (hunk.js). Herdr starts them in the login shell; `exec` makes quitting them
-// close the tab. Their terminals are labelled with the folder they're for
-// (ram.lazygit=<folder>; rg-fzf's script labels its own, ram.rg=<folder>, and
-// a review is ram.hunk=<what>), so each folder has its own.
-// rg-fzf's tab, as sh: while rg-fzf runs the tab is labelled ram.rg (a tool's).
-// What you pick (Enter: the files, ctrl-o: the lines, alt-enter: JSON) stays
-// printed and the tab turns into your shell, a tab like any other; Esc (nothing
-// picked) closes the tab. If rg-fzf can't run, its error stays, in that shell.
-// The key bar (ui.js's BAR) has the same script, RG_TAB, for other layouts.
-export const RG_TAB = [
-  '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" "ram.rg=$PWD" >/dev/null 2>&1',
-  'out=$(rg-fzf); st=$?',
-  '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" ram.rg= >/dev/null 2>&1',
-  '[ -z "$out" ] && [ "$st" -eq 0 ] && exit 0',
-  '[ -n "$out" ] && printf "%s\\n" "$out"',
-  'exec "${SHELL:-/bin/sh}" -il',
-].join("\n");
-// OWN: its script labels its own terminal.
+// repo it's named after (else that folder): lazygit (GIT's click, ctrl-b g)
+// and hunk's reviews (hunk.js). Herdr starts them in the login shell; `exec`
+// makes quitting them close the tab. Their terminals are labelled with the
+// folder they're for (ram.lazygit=<folder>; a review is ram.hunk=<what>), so
+// each folder has its own.
 const TOOLS = {
   lazygit: { name: "lazygit", argv: ["exec", "lazygit"], label: "ram.lazygit" },
-  rg: { name: "rg-fzf", argv: ["exec", "sh", "-c", RG_TAB], label: "ram.rg", own: true },
 };
 const labelled = label => new Set(terminals().filter(t => t.labels?.[label]).map(t => t.address));
 const runsIn = (tabId, addresses) => panes().some(p => p.tab === tabId && p.terminal && addresses.has(p.terminal));
 const isLazygitTab = (tabId, lazygit = labelled(TOOLS.lazygit.label)) => runsIn(tabId, lazygit);
-const isRgTab = (tabId, rg = labelled(TOOLS.rg.label)) => runsIn(tabId, rg);
 const isHunkTab = (tabId, reviews = labelled(HUNK_LABEL)) => runsIn(tabId, reviews);
 // A tool's tab: never a BP, and quitting it goes back where you came from.
-const isToolTab = tabId => isLazygitTab(tabId) || isHunkTab(tabId) || isRgTab(tabId);
+const isToolTab = tabId => isLazygitTab(tabId) || isHunkTab(tabId);
 // The folder a tool's tab is for: its label's (an old "1": where it runs), or null.
 function toolFolderOf(tabId, label) {
   for (const p of panes()) {
@@ -287,6 +274,7 @@ export default class Ram extends View {
     if (role === "hunk-menu") { this.menuView = new HunkMenu(cx); return; }
     if (role === "lang") { this.langView = new LangView(cx); return; }
     if (role === "git-init") { this.gitView = new GitInit(cx); return; }
+    if (role === "search") { this.searchView = new SearchView(cx); return; }
     // With "focusable" (mod.json), ctrl-b h j k l can give a copy the keyboard.
     // The side column takes it (its rows, keyboard()); the strip, the sticks and
     // the peek strip hand it straight back the way it came.
@@ -387,7 +375,7 @@ export default class Ram extends View {
     // ram.meta (meta at SP; again: the space level), ram.space (the space level
     // at the bright BP), ram.hunk (the space you work in's review: its last
     // one, else the menu; on a review: back), ram.git (lazygit), ram.rg
-    // (rg-fzf), ram.follow, ram.enter (the e square), ram.bp (BP moves to SP),
+    // (search, search.js), ram.follow, ram.enter (the e square), ram.bp (BP moves to SP),
     // ram.peek (P: meta's sticks, or the space level's peek strip, on or off),
     // ram.changes (the main stick's view), ram.zoom, ram.back. "focus": the
     // keyboard, handed straight back.
@@ -400,7 +388,7 @@ export default class Ram extends View {
         else if (c === "space") this.enter();
         else if (c === "hunk") this.goHunk(cx);
         else if (c === "git") { const s = frameSpace(); if (s) this.openLazygit(s, cx); }
-        else if (c === "rg") { const s = frameSpace(); if (s) this.openRg(s, cx); }
+        else if (c === "rg") this.search(cx);
         else if (c === "follow") this.toggleFollow();
         else if (c === "enter") setShared("ram.enter", shared("ram.enter") !== true);
         else if (c === "bp") this.bpHere();
@@ -711,7 +699,8 @@ export default class Ram extends View {
   }
 
   // What a space's tools open on: the top of the repo it's named after, else
-  // that folder (lazygit's dialog offers to make it a repo; rg-fzf searches it).
+  // that folder (lazygit's dialog offers to make it a repo; search looks there
+  // when the keyboard isn't in a terminal).
   // undefined while git hasn't looked at it yet; "" when there's no folder.
   toolFolder(s) {
     const ps = panes(), g = this.gitInfo?.info(s, ps);
@@ -781,7 +770,16 @@ export default class Ram extends View {
     if (s && TOOLS[req.kind] && req.folder) this.openToolAt(s, cx, req.kind, req.folder);
   }
 
-  openRg(s, cx) { this.openTool(s, cx, "rg"); }
+  // ^b / (ram.rg) and the space level's / search: the search window
+  // (search.js) for the terminal you're in, in its space; S: the button's
+  // space, where the terminal you're in is unless the keyboard is elsewhere.
+  search(cx, s = null) {
+    const f = focused();
+    const space = s ?? spaces().find(x => x.id === f?.space) ?? frameSpace();
+    if (!space) return;
+    const from = f?.space === space.id ? f : null;
+    cx.spawn(async () => openSearch(space, from, this.toolFolder(space) || ""));
+  }
 
   // A stick's git line: lazygit for that stick's space.
   openLazygitIn(s, cx) { this.openLazygit(spaces().find(x => x.id === s.id) ?? s, cx); }
@@ -1196,19 +1194,18 @@ export default class Ram extends View {
       .on_click((_e, cx) => { cx.stop_propagation(); action(cx); }).child(label);
   }
 
-  // rg-fzf's button for space S, drawn as meta's d diff: its ^b key in amber,
-  // then "rg-fzf"; lit while its rg-fzf tab is the one shown.
-  rgButton(s) {
-    const t = theme(), shown = s.tabs.find(x => x.active), on = Boolean(shown && isRgTab(shown.id));
-    const k = this.key("rg"), full = shortcut("rg");
+  // Search's button for space S, drawn as meta's d diff: its ^b key in amber,
+  // then "search" (the window over the window, search.js).
+  searchButton(s) {
+    const t = theme(), k = this.key("rg"), full = shortcut("rg");
     return h_flex().id("ram-rg").h(15 * U).px(5 * U).gap(4 * U).flex_none().items_center().rounded(2)
-      .border(1).border_color(on ? AMBER : t.input).when(on, el => el.bg(AMBER + "1f"))
+      .border(1).border_color(t.input)
       .cursor_pointer().hover(st => st.bg(t.hover))
-      .tooltip(on ? "rg-fzf is open: Esc closes its tab" : `rg-fzf: search ${s.name}${full ? "  " + terse(full) : ""}`)
+      .tooltip(`Search ${s.name}${full ? "  " + terse(full) : ""}`)
       .on_mouse_down("left", stop)
-      .on_click((_e, cx) => { cx.stop_propagation(); this.openRg(s, cx); })
+      .on_click((_e, cx) => { cx.stop_propagation(); this.search(cx, s); })
       .children(k ? [div().text_size(10 * U).font_semibold().text_color(AMBER).child(k)] : [])
-      .child(div().text_size(10 * U).text_color(on ? AMBER : t.muted).child("rg-fzf"));
+      .child(div().text_size(10 * U).text_color(t.muted).child("search"));
   }
 
   windowButtons() {
@@ -1634,7 +1631,7 @@ export default class Ram extends View {
   // it there; right-click is the tab menu.
   tabChip(s, f, data) {
     const t = theme(), here = f.active, tab = s.tabs.find(x => x.id === f.id);
-    const toolTab = isLazygitTab(f.id) || isRgTab(f.id);
+    const toolTab = isLazygitTab(f.id);
     const name = tab?.named ? tab.name : isLazygitTab(f.id) ? "lazygit" : (f.windows.map(blockText).join(" \u00b7 ") || "empty");
     const list = data.list.filter(a => a.space === s.id && a.tab === f.id);
     const blocked = list.filter(a => a.status === "blocked").length;
@@ -1707,14 +1704,14 @@ export default class Ram extends View {
     const label = (text, extra = []) => h_flex().h(20 * U).flex_none().px(10 * U).gap(5 * U).items_center()
       .child(div().flex_1().text_size(10.5 * U).text_color(t.dim).child(text)).children(extra);
     const count = n => n ? "  " + n : "";
-    // The top row: STACK, its key (^b w, where it fits), rg-fzf's button (as
+    // The top row: STACK, its key (^b w, where it fits), search's button (as
     // meta's main stick has d diff) and + for a new space.
     const stackText = `STACK \u2193${count(data.spaces.length)}`, navKey = terse(shortcut("navigate"));
-    const rgW = s ? 10 * U + textW(this.key("rg"), 10 * U) + 4 * U + textW("rg-fzf", 10 * U) + 2 : 0;
+    const rgW = s ? 10 * U + textW(this.key("rg"), 10 * U) + 4 * U + textW("search", 10 * U) + 2 : 0;
     const keyFits = Boolean(navKey) && 20 * U + textW(stackText, 10.5 * U) + 3 * 5 * U + rgW + 22 * U + textW(navKey, 10 * U) + 2 <= this.size.width - 2;
     const stackLabel = label(stackText, [
       ...(keyFits ? [div().flex_none().text_size(10 * U).text_color(t.dim).child(navKey)] : []),
-      ...(s ? [this.reach(this.rgButton(s), "ram-rg", { open: cx => this.openRg(s, cx), hint: "rg-fzf" })] : []),
+      ...(s ? [this.reach(this.searchButton(s), "ram-rg", { open: cx => this.search(cx, s), hint: "search" })] : []),
       this.reach(this.mini("ram-space-new", "+", `Push: new space${shortcut("space.new") ? "  " + terse(shortcut("space.new")) : ""}`, () => run("space.new")),
         "ram-space-new", { open: () => run("space.new"), hint: "new space" })]);
     if (!s) return this.sized(shell).child(stackLabel)
@@ -2113,6 +2110,7 @@ export default class Ram extends View {
     if (role === "hunk-menu") return this.menuView.render();
     if (role === "lang") return this.langView.render();
     if (role === "git-init") return this.gitView.render();
+    if (role === "search") return this.searchView.render(cx);
     this.countReviews();
     if (role === "side") return this.side(cx);
     if (role === "peek") return this.peek();
@@ -2134,7 +2132,11 @@ export default class Ram extends View {
     return this.strip(data);
   }
 
-  async close() { if (props()?.role === "rams") this.save(); }
+  async close() {
+    const role = props()?.role;
+    if (role === "rams") this.save();
+    if (role === "search") await this.searchView?.close();
+  }
 }
 
 // What runs there: the agent's own title when it says something, else the app's

@@ -34,8 +34,9 @@ and switching takes you back to it.
 For example: you work in api `&2` and watch an agent in testing `*1` from
 meta. `^b i` takes you back to api `&2`, and `^b m` to testing `*1`.
 
-lazygit, rg-fzf and hunk open in tabs of their own, the `ctrl-b` key bar works
-in every layout, and an optional Neovim theme follows the layout.
+lazygit and hunk open in tabs of their own, search (`^b /`) in a window over
+the tab you're in, the `ctrl-b` key bar works in every layout, and an optional
+Neovim theme follows the layout.
 
 ## What's in it
 
@@ -43,13 +44,13 @@ in every layout, and an optional Neovim theme follows the layout.
 |---|---|
 | `layouts/ram.json`, `layouts/ram.svg` | the layout, and the picture Settings shows for it |
 | `themes/ram.json` | phosphor green on near-black, amber for the current thing |
-| `mods/ram/` | the layout's mod: the strip, the side column, the sticks, the peek strip, HUNK, LANG and GIT's dialog |
+| `mods/ram/` | the layout's mod: the strip, the side column, the sticks, the peek strip, HUNK, LANG, GIT's dialog and the search window (and `ram-search`) |
 | `mods/ram-menu/` | the terminals' right-click menu: Copy and Paste, then Herdr's own items |
-| `mods/prefix/` | the `ctrl-b` key bar, in every layout (with `^b w` navigate mode, `^b g` lazygit and `^b /` rg-fzf) |
+| `mods/prefix/` | the `ctrl-b` key bar, in every layout (with `^b w` navigate mode, `^b g` lazygit and `^b /` search) |
 | `mods/text-bigger/`, `mods/text-smaller/` | ⌘+ and ⌘−: the terminals' text a size bigger or smaller |
 | `keys.json` | my whole keymap: the `ctrl-b` keys, ⌘+/⌘−, and my terminal keys |
 | `nvim/` | my Herdr colorschemes (`herdr`, `herdr-ram`, `herdr-traveler`, `herdr-night-city`) and the switch that follows the layout (LazyVim) |
-| `tests/` | `verify.mjs`, checks that need no Herdr window, and `mutate.py` |
+| `tests/` | `verify.mjs`, checks that need no Herdr window; `search-e2e.mjs`, the search window with real ripgrep, fzf and bat; and `mutate.py` |
 | `preview.png` | a picture of the meta level (the gallery shows it) |
 | `RECIPE.md` | the brief to build RAM from scratch; an agent installs from it |
 
@@ -61,15 +62,19 @@ it will install and asks once first.
 
 - git, [lazygit](https://github.com/jesseduffield/lazygit) for `^b g` and the
   GIT lines, and [hunk](https://hunk.dev) for the reviews (`^b r`, HUNK).
-- [rg-fzf](https://github.com/officialparacite/rg-fzf) for `^b /` and the space
-  level's `rg-fzf` button, with what it needs: ripgrep, fzf, bat and jq.
-- An editor for the files LANG and rg-fzf open, set as your `$EDITOR`. You
+- [ripgrep](https://github.com/BurntSushi/ripgrep),
+  [fzf](https://github.com/junegunn/fzf) and
+  [bat](https://github.com/sharkdp/bat) for the search window (`^b /`).
+- An editor for the files LANG and search open, set as your `$EDITOR`. You
   pick it: Neovim, set up with LazyVim and RAM's theme, or
   [Fresh](https://github.com/sinelaw/fresh), which works like a desktop editor
   and has no learning curve.
 
-It needs the [Herdr app](https://herdr.dev) 0.1.15 or later, with its
-herdr-core, and an agent in a Herdr terminal. Tested on 0.1.15 on macOS.
+It needs the [Herdr app](https://herdr.dev) 0.1.18 or later, with its
+herdr-core, and an agent in a Herdr terminal. Tested on 0.1.18 on macOS.
+[rg-fzf](https://github.com/officialparacite/rg-fzf), the same search in a
+terminal, isn't needed any more and isn't installed; it still works beside
+RAM.
 
 ## Install on one of my machines
 
@@ -78,10 +83,11 @@ In a Herdr terminal, ask your agent:
 > Read ~/.config/herdr-app/AGENTS.md, then add this layout: https://github.com/officialparacite/herdr-ram/tree/private
 
 It installs the tools above, copies the layout, theme and mods into
-`~/.config/herdr-app`, replaces `keys.json` with mine, checks each mod and
-switches the window to RAM. Everything it replaces goes to
-`~/.config/herdr-app/.backup-ram-<time>/` first, and changed Neovim files are
-kept as `<file>.bak-<time>`. RECIPE.md has the steps it follows.
+`~/.config/herdr-app`, replaces `keys.json` with mine, links `ram-search` into
+`~/.local/bin`, checks each mod and switches the window to RAM. Everything it
+replaces goes to `~/.config/herdr-app/.backup-ram-<time>/` first, and changed
+Neovim files are kept as `<file>.bak-<time>`. RECIPE.md has the steps it
+follows.
 
 To update a machine, ask it the same again.
 
@@ -118,9 +124,9 @@ between memory and diff (and shows it if you hid it).
   was. Until then a dim **RET▸** marks that tab, like a return address. In
   meta the terminal follows SP; in the space level only SP moves, `m meta`
   turns red and the peek strip shows the agent, so `^b m` opens on it.
-- **e** (`^b e`, under `f`): with it on, lazygit, hunk, rg-fzf and `^b I`
-  from meta take you into the space level. Off (the default), you stay in
-  meta: the tool shows in meta's terminal, and SP goes back when you quit it.
+- **e** (`^b e`, under `f`): with it on, lazygit, hunk and `^b I` from meta
+  take you into the space level. Off (the default), you stay in meta: the tool
+  shows in meta's terminal, and SP goes back when you quit it.
 
 For example: you watch testing `*1` from meta and an agent in web asks for
 approval. SP jumps to web and `RET▸` marks testing `*1`. You approve, and SP
@@ -149,7 +155,7 @@ them; Esc, any other key or a click closes it.
 | Panes | `h` `j` `k` `l` focus · `H` `J` `K` `L` swap · `v` split right · `-` split down · `x` close · `z` zoom |
 | Agents | `a` / `A` next / previous |
 | Git | `g` lazygit at the repo you're in (a folder that isn't one: a dialog to make it one) |
-| Search | `/` rg-fzf at the repo you're in (else its folder) |
+| Search | `/` the search window, at the repo you're in (else its folder) |
 | RAM | `m` meta · `i` space · `I` BP here · `f` follow · `e` enter · `P` sticks (meta) or peek strip (space) · `r` hunk (the space's review, else its menu) · `d` diff (meta's main stick) |
 | App | `:` palette · `?` all keys · `s` settings · `b` side column (each level keeps its own) · `space` next layout · `+` / `_` / `0` zoom in / out / reset · `ctrl-b` sends `ctrl-b` to the program |
 
@@ -193,7 +199,7 @@ markup languages count, as on GitHub; vendored and generated files
 - In a short column LANG gives way first (its rows, then all of it), so the
   stack and heap keep room.
 
-## lazygit, rg-fzf and hunk
+## lazygit and hunk
 
 They open in tabs of their own in the space you work in, one per repo, for the
 repo the space is named after (its first terminal's). GIT, HUNK, LANG and each
@@ -205,12 +211,6 @@ From meta they show in meta's terminal unless `e` is on.
   (`git init`, with a first branch name or git's default) or open one of
   lazygit's recent repos. Quitting lazygit closes the tab and takes you back.
   In other layouts `^b g` does the same at the focused terminal's repo.
-- `^b /`, or the `/ rg-fzf` button at the top of the space level's column,
-  opens rg-fzf at the space's repo (no repo: its folder). It works as it does
-  on its own: Enter prints the files you picked, `ctrl-o` the lines,
-  `alt-enter` JSON, and then the tab is your shell, with that output above the
-  prompt. Esc closes the tab and takes you back. In other layouts `^b /` opens
-  it at the focused terminal's repo.
 - `^b r`, or HUNK's header, opens the space's last review, else a menu:
   `hunk diff` and `diff --staged` (live, `--watch`), `show`, `log`,
   `stash show`, `status`, with an optional ref. HUNK, under GIT, lists the
@@ -219,6 +219,32 @@ From meta they show in meta's terminal unless `e` is on.
   plain diff loads the repo's `.hunk/notes.json`. `^b r` on a review takes you
   back and leaves it open, so an agent can read your notes with
   `hunk session`.
+
+## Search
+
+`^b /` (in any layout), or the `/ search` button at the top of the space
+level's column, opens a window over the tab you're in, at the repo of the
+terminal you came from (else its folder). It does what
+[rg-fzf](https://github.com/officialparacite/rg-fzf) does, with every key also
+a button: ripgrep searches as you type and the results come in while it runs,
+and the file under the cursor shows beside them in bat's colors, its line lit.
+Drag the divider between them, or use `Alt-[` and `Alt-]`.
+
+- Enter puts the picked files (else the current line's) at the prompt of the
+  terminal you came from, on one line; `Ctrl-O` the lines as
+  `file:line:column:text`; `Alt-Enter` rg-fzf's JSON. `Alt-C` copies them
+  instead. They go through the clipboard, so it holds them afterwards.
+- `Ctrl-E`, or a double-click, opens `$EDITOR` at the line in a new tab.
+- `Ctrl-F` switches to filename mode (fzf's fuzzy match, with a query of its
+  own); `Alt-P` PCRE2, `Alt-V` invert, `Alt-I` hidden files, `Alt-U` one
+  result per file, `Alt-S` the terminal's folder instead of its repo.
+- `Tab` / `Shift-Tab` pick and move, `Ctrl-A` / `Ctrl-Z` all or none; `Ctrl-P`
+  the preview, `Ctrl-D` / `Ctrl-U` its scroll, `Alt-W` wrap, `Alt-N` line
+  numbers; `Alt-/` or `F1` lists every key. Esc closes.
+- Each space keeps its last search, and the window keeps its divider, for the
+  next time.
+- `git ls-files | ram-search` (or `ram-search <paths>`) opens it in a tab of
+  its own for those files; picks go back to that terminal.
 
 ## Neovim (LazyVim + aether.nvim)
 
@@ -244,11 +270,15 @@ When you pick Neovim, the install copies them to the same paths under
 ```sh
 node tests/verify.mjs                                 # this repo's files (Node 22+)
 RAM_HOME=~/.config/herdr-app node tests/verify.mjs    # an installed copy
+node tests/search-e2e.mjs                             # the search window, for real
 ```
 
 They load the mods with a stand-in for Herdr and check what they draw and run;
-no window, terminal or network is touched. `tests/mutate.py` breaks the code in
-a copy, one change at a time, to show the checks notice.
+no window, terminal or network is touched. `tests/mutate.py` breaks the code
+in a copy, one change at a time, to show the checks notice.
+`tests/search-e2e.mjs` runs the search window's code with real ripgrep, fzf,
+bat and `ram-search` on a folder it makes in `$TMPDIR` (and removes), and
+compares what it finds with ripgrep's own results.
 
 ## Removing
 
@@ -257,6 +287,7 @@ H=~/.config/herdr-app
 herdr-app do layout.switch '{"name":"main"}'
 rm -rf "$H"/mods/ram "$H"/mods/ram-menu "$H"/data/ram "$H"/data/ram-menu
 rm -f "$H"/layouts/ram.json "$H"/layouts/ram.svg "$H"/layouts/.state/ram.json "$H"/themes/ram.json
+rm -f ~/.local/bin/ram-search
 ```
 
 Keep `mods/prefix`, `mods/text-bigger`, `mods/text-smaller` and `keys.json`

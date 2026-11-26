@@ -88,33 +88,30 @@ export async function lazygitHere() {
   run("tab.new", { space: s.id, name: `lazygit ${top.replace(/\/+$/, "").split("/").pop()}`, folder: top, argv: LAZY_ARGV });
 }
 
-// ^b / outside RAM (RAM opens its own: ram.rg): rg-fzf in a new tab at the repo
-// of the terminal you're in, else that terminal's folder. RG_TAB is RAM's script
-// (mods/ram/main.js, the same text): while rg-fzf runs the tab is labelled ram.rg;
-// what you pick stays printed and the tab turns into your shell; Esc (nothing
-// picked) closes the tab.
-export const RG_TAB = [
-  '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" "ram.rg=$PWD" >/dev/null 2>&1',
-  'out=$(rg-fzf); st=$?',
-  '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" ram.rg= >/dev/null 2>&1',
-  '[ -z "$out" ] && [ "$st" -eq 0 ] && exit 0',
-  '[ -n "$out" ] && printf "%s\\n" "$out"',
-  'exec "${SHELL:-/bin/sh}" -il',
-].join("\n");
-
-export async function rgHere() {
+// ^b / outside RAM (RAM opens its own: ram.rg): RAM's search window (the ram
+// mod, role search; mods/ram/search.js, whose openSearch() does the same in
+// RAM) over the window, for the terminal you're in: its folder, and its repo's
+// top when it's in one. What you pick goes to that terminal's prompt.
+export async function searchHere() {
   const f = focused();
   const s = spaces().find((x) => x.id === f?.space) ?? spaces().find((x) => x.active);
   if (!s) return;
-  const cwd = panes().find((p) => p.pane === f?.pane)?.cwd || f?.cwd || s.folder || "";
-  let top = cwd;
-  if (cwd) {
-    try {
-      const r = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on: s.machine ?? null });
-      if (r.code === 0 && r.stdout.trim()) top = r.stdout.trim();
-    } catch (_) { /* a machine that can't be reached: search the folder */ }
+  const term = f?.terminal ?? null;
+  const folder = (term && (panes().find((p) => p.pane === f?.pane)?.cwd || f?.cwd)) || s.folder || "";
+  if (!folder) {
+    notify({ title: "Nowhere to search", body: `${s.name} has no folder yet.`, level: "info", timeout: 4000 });
+    return;
   }
-  run("tab.new", { space: s.id, name: `rg-fzf ${(top || s.name).replace(/\/+$/, "").split("/").pop()}`, ...(top ? { folder: top } : {}), argv: ["exec", "sh", "-c", RG_TAB] });
+  let repo = null;
+  try {
+    const r = await exec("git", ["rev-parse", "--show-toplevel"], { cwd: folder, on: s.machine ?? null });
+    if (r.code === 0 && r.stdout.trim()) repo = r.stdout.trim();
+  } catch (_) { /* a machine that can't be reached: the folder */ }
+  const at = Date.now();
+  setShared("ram.search.top", at);
+  openOverlay({ mod: "ram", kind: "dialog", width: 0.9, height: 0.86,
+    props: { role: "search", at, space: s.id, name: s.name, machine: s.machine ?? null,
+      target: term ? { pane: f.pane ?? null, terminal: term } : null, folder, repo } });
 }
 
 // "pane.split:right" -> run("pane.split", { direction: "right" }); the value fills
@@ -178,7 +175,7 @@ function runCommand(text) {
   }
   if (name === "worktree") return newWorktree();
   if (name === "lazygit") return shared("layout") === "ram" ? run("ram.git", {}) : lazygitHere();
-  if (name === "rg") return shared("layout") === "ram" ? run("ram.rg", {}) : rgHere();
+  if (name === "rg") return shared("layout") === "ram" ? run("ram.rg", {}) : searchHere();
   if (at < 0) return run(name, {});
   const value = text.slice(at + 1);
   const first = commands().find((c) => c.name === name)?.args?.[0]?.name;
@@ -223,7 +220,7 @@ const LABELS = {
   "space.close": "close space", "worktree": "new worktree", "mod.open:picker": "picker",
   "pane.go": "focus", "pane.swap": "swap", "pane.split:right": "split right",
   "pane.split:down": "split down", "pane.close": "close pane", "pane.zoom": "zoom",
-  "agent.next": "next", "agent.prev": "prev", "lazygit": "lazygit", "rg": "rg-fzf",
+  "agent.next": "next", "agent.prev": "prev", "lazygit": "lazygit", "rg": "search",
   "ram.meta": "meta", "ram.space": "space", "ram.hunk": "hunk", "ram.follow": "follow", "ram.enter": "enter",
   "ram.bp": "BP here", "ram.peek": "peek", "ram.changes": "diff",
   "app.palette": "palette", "app.help": "all keys", "app.settings": "settings",
@@ -301,14 +298,14 @@ export default class Prefix extends View {
   }
 
   // The one way a key runs: once per bar, then the bar is gone. lazygit and
-  // rg-fzf outside RAM first ask git where the repo is, and the bar stays up for
+  // search outside RAM first ask git where the repo is, and the bar stays up for
   // that moment (once it closes, its tasks stop).
   finish(c, cx) {
     if (this.done) return;
     this.done = true;
     if ((c === "lazygit" || c === "rg") && shared("layout") !== "ram" && cx) {
       cx.spawn(async () => {
-        try { await (c === "rg" ? rgHere() : lazygitHere()); } finally { this.hide(); }
+        try { await (c === "rg" ? searchHere() : lazygitHere()); } finally { this.hide(); }
       });
       return;
     }

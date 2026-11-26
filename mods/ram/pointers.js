@@ -6,10 +6,10 @@
 //          moves it in either level, without changing the screen outside meta.
 //   BP     "ram.bp" {space id: tab id}: each space's work tab, the one the
 //          space level shows in that space. It moves when you change tabs in
-//          the space level, and with ^b I. A tool's tab (lazygit, a review,
-//          rg-fzf) never is one.
+//          the space level, and with ^b I. A tool's tab (lazygit, a review)
+//          never is one.
 //   frame  "ram.frame": the space you work in, whose BP is the bright one: the
-//          space the space level shows, where ^b g, ^b r and ^b / open their tools.
+//          space the space level shows, where ^b g and ^b r open their tools.
 //   came   "ram.came" {level, space, tab, pane}: where you were when a tool's
 //          tab showed, so quitting the tool (or ^b r on a review) goes back there.
 //   goto   "ram.goto" {tab, pane, at}: what the next level change shows instead
