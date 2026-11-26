@@ -1,0 +1,36 @@
+#!/bin/sh
+# ram-search: RAM's search window (mods/ram/search.js) on the files you give
+# it, as rg-fzf takes them: paths, or a list on stdin, one name a line or
+# NUL-separated (find -print0, fd -0). It opens in a tab of its own; what you
+# pick (Enter, ^o, ⌥⏎) goes to this terminal's prompt, so run it at a shell
+# prompt in a Herdr terminal.
+#   ram-search src/ README.md     git ls-files | ram-search     fd -e rs | ram-search
+die() { echo "ram-search: $*" >&2; exit 1; }
+[ -n "$HC_TERMINAL_ID" ] || die "run it in a Herdr terminal (HC_TERMINAL_ID isn't set)"
+list=$(mktemp "${TMPDIR:-/tmp}/ram-search-list.XXXXXX") || die "couldn't make a file for the list"
+if [ "$#" -gt 0 ]; then
+  for p in "$@"; do
+    [ -e "$p" ] || { rm -f -- "$list"; die "no such file or directory: $p"; }
+    printf '%s\0' "$p"
+  done > "$list"
+elif [ ! -t 0 ]; then
+  cat > "$list.in"
+  # NUL-separated when there's a NUL in it (a name never has one), else a name a
+  # line; each name once, empty ones dropped.
+  if [ "$(tr -d '\000' < "$list.in" | wc -c)" -eq "$(wc -c < "$list.in")" ]; then
+    tr '\n' '\000' < "$list.in"
+  else
+    cat -- "$list.in"
+  fi | tr -s '\000' | LC_ALL=C sort -zu > "$list"
+  rm -f -- "$list.in"
+  [ "$(tr -d '\000' < "$list" | wc -c)" -gt 0 ] || { rm -f -- "$list"; die "no files given on stdin"; }
+else
+  rm -f -- "$list"
+  die "give it paths, or a file list on stdin: git ls-files | ram-search"
+fi
+# The window's props as JSON (each value with its \ and " escaped).
+j() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+props=$(printf '{"role":"search","list":"%s","cwd":"%s","target":{"pane":null,"terminal":"%s"}}' \
+  "$(j "$list")" "$(j "$PWD")" "$(j "$HC_TERMINAL_ID")")
+herdr-app do tab.new --name search --mod ram --props "$props" > /dev/null ||
+  { rm -f -- "$list"; die "herdr-app couldn't open the search tab"; }

@@ -14,7 +14,7 @@
 import { hc } from "herdr";
 
 export const PROCS = "ram.procs";
-const TOOL_LABELS = ["ram.lazygit", "ram.rg", "ram.hunk"];
+const TOOL_LABELS = ["ram.lazygit", "ram.hunk"];
 // Programs that wait for you rather than work: by Herdr's program key, or the
 // command's own name.
 export const WAITING = new Set(["nvim", "vim", "hx", "emacs", "nano", "micro", "fresh", "lazygit", "less", "htop", "tmux", "ssh",

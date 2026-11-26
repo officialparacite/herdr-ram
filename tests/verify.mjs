@@ -194,7 +194,7 @@ const stub = url(`
     // LANG's read: a repo's tree from host.lsTree (none: no commit yet).
     if (command === "git" && args.includes("ls-tree"))
       return host.lsTree ? { code: 0, stdout: host.lsTree, stderr: "" } : { code: 128, stdout: "", stderr: "fatal: Not a valid object name HEAD" };
-    // Folders under /repo/<name> are in that repo, for the key bar's lazygit and rg-fzf outside RAM.
+    // Folders under /repo/<name> are in that repo, for the key bar's lazygit and search outside RAM.
     if (command === "git" && args[0] === "rev-parse" && args[1] === "--show-toplevel" && opts?.cwd?.startsWith("/repo/"))
       return { code: 0, stdout: opts.cwd.split("/").slice(0, 3).join("/") + "\\n", stderr: "" };
     return { code: 1, stdout: "", stderr: "fatal: not a git repository" }; };
@@ -215,12 +215,16 @@ async function load(path) {
   return u;
 }
 const gitURL = await load("mods/ram/git.js");
-const { default: Ram, LEVELS, level, sideWidth, sideHidden, sticksShown, fitBlocks, RG_TAB } = await import(await load("mods/ram/main.js"));
+const { default: Ram, LEVELS, level, sideWidth, sideHidden, sticksShown, fitBlocks } = await import(await load("mods/ram/main.js"));
+const S = await import(await load("mods/ram/search.js"));
 // Spawned tasks run at once; settle() lets their awaits finish. (Some never end,
 // like the command loop waiting on nextCommand, so they can't be awaited.)
 // A focus handle has the keyboard while host.keyboard is it (focus() gives it).
 const cx = { timer: { every: (ms, fn) => host.timers.push({ ms, fn }), after: () => {} }, notify() {},
   spawn: fn => fn(cx), stop_propagation() { host.stopped = true; },
+  // Key bindings a view installs (cx.bind_keys), and the clipboard.
+  bind_keys(list) { (host.bindings ??= []).push(...list); return list.length; },
+  write_to_clipboard(text) { host.clipboard = text; }, read_from_clipboard() { return host.clipboard; },
   focus_handle() { const h = { focus() { host.keyboard = h; }, is_focused: () => host.keyboard === h, release: () => true }; return h; } };
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0)); };
 const flatten = tree => typeof tree === "object" && tree ? [tree, ...tree.kids.flatMap(flatten)] : [];
@@ -1537,129 +1541,770 @@ await send("git");
 assert.equal(host.notes.at(-1)?.title, "Checking git", "not looked at yet: try again in a moment");
 spaces[0].folder = "/repo/api";
 
-// ---- ^b /: rg-fzf in a tab of its own (the space level's rg-fzf button) --------------------
+// ---- ^b /: the search window (search.js) over the window (the space level's / search) -------
 assert.equal(keysFile[`mod:${BAR}`]["/"], `${BAR}.rg`, "^b / is bound in every layout (the key bar sends RAM's to ram.rg)");
 {
-  const rgArgv = JSON.stringify(["exec", "sh", "-c", RG_TAB]);
-  const rgOpen = (space, folder) => ({ command: "herdr-app", args: ["do", "tab.new", "--space", space,
-    "--name", `rg-fzf ${folder.split("/").pop()}`, "--folder", folder, "--argv", rgArgv], opts: undefined });
   host.shared.set("ram.zoom", "space");
   side.gitInfo.git[JSON.stringify([null, "/repo/api"])] ??= cmdMap.gitInfo.git[JSON.stringify([null, "/repo/api"])];
+  const shellPane = panes.find(p => p.pane === "shell-pane");
   let st = R(side, { role: "side" });
-  const rgb = withId(st, "ram-rg");
-  assert(rgb, "the space level's top row has rg-fzf's button");
-  assert.deepEqual(textOf(rgb), ["/", "rg-fzf"], "its key, then rg-fzf, as meta's d diff");
-  assert.equal(op(rgb, "tooltip")[0], "rg-fzf: search api  ^b /");
-  const row = flatten(st).find(n => n.kids.includes(rgb));
-  assert.deepEqual(row.kids.slice(1).map(idOf), [undefined, "ram-rg", "ram-space-new"], "STACK's row: ^b w, rg-fzf, then +");
+  const sb = withId(st, "ram-rg");
+  assert(sb, "the space level's top row has search's button");
+  assert.deepEqual(textOf(sb), ["/", "search"], "its key, then search, as meta's d diff");
+  assert.equal(op(sb, "tooltip")[0], "Search api  ^b /");
+  const row = flatten(st).find(n => n.kids.includes(sb));
+  assert.deepEqual(row.kids.slice(1).map(idOf), [undefined, "ram-rg", "ram-space-new"], "STACK's row: ^b w, search, then +");
   assert.deepEqual(textOf(row.kids[1]), ["^b w"]);
-  assert(!op(rgb, "bg"), "not lit: no rg-fzf tab shows");
-  // A click opens it at the space's repo top, named after it. Its script labels the tab
-  // with its folder, so RAM doesn't.
-  host.execs = []; host.hcs = []; host.notes = [];
+  // A click: the window, for the terminal you're in: its folder and its repo's top
+  // (git asked there); what you pick goes to it.
+  shellPane.cwd = "/repo/api/src";
+  host.focused = { space: "s0", tab: "tab0-0", pane: "shell-pane", terminal: "shell", cwd: "/repo/api/src" };
+  host.overlays = []; host.execs = []; host.calls = [];
   click(st, "ram-rg"); await settle();
-  assert.deepEqual(host.execs.at(-1), rgOpen("s0", "/repo/api"));
-  assert.deepEqual(host.hcs, [], "no hc label from RAM");
-  assert.deepEqual([host.shared.get("ram.zoom"), host.shared.get("ram.opening")], ["space", null]);
-  // ram.rg (^b / in RAM) does the same. From meta it stays in meta, unless e is on.
-  host.execs = []; host.shared.set("ram.zoom", "meta");
+  const o = host.overlays.at(-1);
+  assert(o?.props?.at > 0, "it carries its mark");
+  assert.deepEqual(o, { mod: "ram", kind: "dialog", width: 0.9, height: 0.86, props: { role: "search", at: o.props.at, space: "s0",
+    name: "api", machine: null, target: { pane: "shell-pane", terminal: "shell" }, folder: "/repo/api/src", repo: "/repo/api" } },
+    "a dialog over the window: the terminal's folder, its repo, and where picks go");
+  assert.equal(host.shared.get(S.SEARCH_TOP), o.props.at, "the newest window's mark (an older one closes)");
+  assert.deepEqual(host.execs.find(e => e.command === "git")?.args, ["rev-parse", "--show-toplevel"]);
+  assert.equal(host.execs.find(e => e.command === "git")?.opts?.cwd, "/repo/api/src");
+  assert.equal(host.calls.filter(c => c.name === "tab.new").length, 0, "no tab of its own any more");
+  // ram.rg (^b / in RAM) does the same, and the level stays.
+  host.shared.set("ram.zoom", "meta"); host.overlays = [];
   await send("rg");
-  assert.deepEqual(host.execs.at(-1), rgOpen("s0", "/repo/api"), "^b / opens it as the button does");
-  assert.equal(host.shared.get("ram.zoom"), "meta", "e off: in meta, where you are");
-  host.shared.set("ram.enter", true); host.execs = [];
+  assert.equal(host.overlays.at(-1)?.props?.folder, "/repo/api/src", "^b / opens it as the button does");
+  assert.equal(host.shared.get("ram.zoom"), "meta", "in meta, where you are");
+  host.shared.set("ram.zoom", "space");
+  // The keyboard in a mod's pane (no terminal): the space's repo, nowhere to paste.
+  delete shellPane.cwd;   // (so the space is at its own folder, whose git RAM knows)
+  host.focused = { space: "s0", tab: "tab0-0", pane: "pMOD", terminal: null, cwd: "/home/tester/elsewhere" }; host.overlays = [];
+  const apiGitKey = JSON.stringify([null, "/repo/api"]), apiGit = cmdMap.gitInfo.git[apiGitKey];
+  cmdMap.gitInfo.git[apiGitKey] = { ...apiGit, top: "/repo/api-top" };
   await send("rg");
-  assert.equal(host.shared.get("ram.zoom"), "space", "e on: into the space level");
-  host.shared.delete("ram.enter");
-  // Not a repo: the folder (rg-fzf needs no git); nothing at all: a toast.
-  spaces[0].folder = "/home/tester/notes"; side.gitInfo.git[JSON.stringify([null, "/home/tester/notes"])] = null;
-  host.execs = [];
+  cmdMap.gitInfo.git[apiGitKey] = apiGit;
+  assert.deepEqual([host.overlays.at(-1)?.props?.folder, host.overlays.at(-1)?.props?.repo, host.overlays.at(-1)?.props?.target],
+    ["/repo/api-top", "/repo/api-top", null], "no terminal: the space's repo (as its tools open it); picks are copied");
+  // The keyboard in another space's terminal: this space's repo, nowhere to paste.
+  host.focused = { space: "s1", tab: "tab1-0", pane: "p5", terminal: "t6", cwd: "/repo/web" }; host.overlays = [];
   click(R(side, { role: "side" }), "ram-rg"); await settle();
-  assert.deepEqual(host.execs.at(-1), rgOpen("s0", "/home/tester/notes"), "not a repo: that folder");
-  assert.equal(host.notes.length, 0, "no toast for that");
-  spaces[0].folder = ""; host.execs = [];
-  click(R(side, { role: "side" }), "ram-rg"); await settle();
-  assert.deepEqual([host.execs.length, host.notes.at(-1)?.title], [0, "Nowhere for rg-fzf"]);
+  assert.deepEqual([host.overlays.at(-1)?.props?.space, host.overlays.at(-1)?.props?.folder, host.overlays.at(-1)?.props?.target],
+    ["s0", "/repo/api", null], "the button's space, not the other one's terminal");
+  // Not in a repo: that folder, no repo.
+  shellPane.cwd = "/home/tester/notes";
+  host.focused = { space: "s0", tab: "tab0-0", pane: "shell-pane", terminal: "shell", cwd: "/home/tester/notes" }; host.overlays = [];
+  await send("rg");
+  assert.deepEqual([host.overlays.at(-1)?.props?.folder, host.overlays.at(-1)?.props?.repo], ["/home/tester/notes", null]);
+  // Nowhere at all: a toast.
+  delete shellPane.cwd;
+  host.focused = null; spaces[0].folder = ""; host.overlays = []; host.notes = [];
+  await send("rg");
+  assert.deepEqual([host.overlays.length, host.notes.at(-1)?.title, host.notes.at(-1)?.body], [0, "Nowhere to search", "api has no folder yet."]);
   spaces[0].folder = "/repo/api"; host.notes = [];
-  // While rg-fzf runs (its terminal labelled ram.rg=<its folder>) its tab is a tool's: the
-  // button and its strip chip light up, the button shows it again, and it isn't a BP.
-  spaces[0].tabs.push({ id: "tabRG", name: "rg-fzf api", named: true, index: 3, active: false, settled: false, status: null });
-  panes.push({ pane: "pRG", terminal: "tRG", tab: "tabRG", title: "rg-fzf", status: null, focused: true, program: { name: "fzf" } });
-  raw.push({ address: "tRG", state: "live", created_ms: 9600, labels: { "ram.rg": "/repo/api" } });
-  spaces[0].tabs.forEach(t => t.active = t.id === "tabRG");
-  R(map, {}); await settle();
-  st = R(side, { role: "side" });
-  assert.deepEqual(op(withId(st, "ram-rg"), "border_color"), ["#ffb547"], "lit while its tab shows");
-  assert.equal(op(withId(st, "ram-rg"), "tooltip")[0], "rg-fzf is open: Esc closes its tab");
-  const chip = withId(R(map, {}), "tabchip-tabRG");
-  assert(flatten(chip).some(n => n.kids.includes("rg-fzf api") && op(n, "text_color")?.[0] === "#6fe3d3"), "its chip: its name, in cyan");
-  assert.equal(host.shared.get("ram.bp").s0, "tab0-0", "not a BP: api's stays its work tab");
-  assert.deepEqual(host.shared.get("ram.came"), { level: "space", space: "s0", tab: "tab0-0", pane: null }, "where you came from is kept");
-  host.execs = []; host.calls = [];
-  click(st, "ram-rg"); await settle();
-  assert.deepEqual([host.execs.length, host.calls.at(-1)], [0, { name: "tab.select", args: { id: "tabRG" } }], "one open for this repo: show it");
-  // From meta: e off, it shows there; e on, the space level shows it (the level change
-  // shows ram.goto's place instead of the BP).
-  host.shared.set("ram.zoom", "meta");
-  R(map, {}); await settle();
-  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");  // (meta shows SP: api *1)
-  R(map, {}); await settle();
-  host.calls = [];
-  await send("rg");
-  assert.deepEqual([host.calls, host.shared.get("ram.zoom")], [[{ name: "tab.select", args: { id: "tabRG" } }], "meta"], "e off: in meta");
-  host.shared.set("ram.enter", true); host.calls = [];
-  await send("rg");
-  assert.deepEqual([host.calls, host.shared.get("ram.zoom")], [[], "space"], "e on: into the space level");
-  R(map, {}); await settle();
-  assert.deepEqual(host.calls.filter(c => c.name === "tab.select" || c.name === "pane.focus"), [{ name: "tab.select", args: { id: "tabRG" } }],
-    "which shows rg-fzf, not the BP");
-  host.shared.delete("ram.enter");
-  spaces[0].tabs.forEach(t => t.active = t.id === "tabRG");
-  R(map, {}); await settle();
-  host.shared.set("ram.came", { level: "space", space: "s0", tab: "tab0-0", pane: null });
-  // One per folder: rg-fzf for another repo is another tab.
-  raw.at(-1).labels = { "ram.rg": "/repo/other" };
-  click(R(side, { role: "side" }), "ram-rg"); await settle();
-  assert.deepEqual(host.execs.at(-1), rgOpen("s0", "/repo/api"), "the open one is for another repo: a new one for this");
-  raw.at(-1).labels = { "ram.rg": "/repo/api" };
-  // Esc in rg-fzf ends the tab: RAM shows the tab you came from (Herdr picked another).
-  spaces[0].tabs.pop(); panes.pop();
-  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-1");
-  host.calls = [];
-  R(map, {}); await settle();
-  assert.deepEqual(host.calls.filter(c => c.name === "tab.select" || c.name === "pane.focus"), [{ name: "tab.select", args: { id: "tab0-0" } }],
-    "Esc: back to the tab before rg-fzf");
-  assert.equal(host.shared.get("ram.came"), null, "and that's used up");
-  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");  // (as the window would, after that tab.select)
-  R(map, {}); await settle();
-  // What you pick stays printed and the tab turns into a shell like any other (the label
-  // goes): no longer a tool's, so it can be a BP, and the button isn't lit.
-  spaces[0].tabs.push({ id: "tabRG", name: "rg-fzf api", named: true, index: 3, active: true, settled: false, status: null });
-  panes.push({ pane: "pRG", terminal: "tRG", tab: "tabRG", title: "zsh", status: null, focused: true, program: { name: "zsh" } });
-  raw.at(-1).labels = {};
-  spaces[0].tabs.forEach(t => t.active = t.id === "tabRG");
-  R(map, {}); await settle();
-  assert(!op(withId(R(side, { role: "side" }), "ram-rg"), "bg"), "a plain tab now");
-  assert.equal(host.shared.get("ram.bp").s0, "tabRG", "api's BP");
-  spaces[0].tabs.pop(); panes.pop(); raw.pop();
-  spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");
-  R(map, {}); await settle();
-  assert.equal(host.shared.get("ram.bp").s0, "tab0-0");
   // Only the space level has the button (meta's column is the main stick).
   host.shared.set("ram.zoom", "meta");
   assert(!withId(R(side, { role: "side" }), "ram-rg"), "not in meta");
   host.shared.set("ram.zoom", "space");
-  // The script: it labels its tab with its folder while rg-fzf runs and unlabels it
-  // after; Esc (nothing printed, exit 0) ends the tab; else what was picked is printed
-  // and a shell starts.
-  assert.deepEqual(RG_TAB.split("\n"), [
-    '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" "ram.rg=$PWD" >/dev/null 2>&1',
-    'out=$(rg-fzf); st=$?',
-    '[ -n "$HC_TERMINAL_ID" ] && hc label "$HC_TERMINAL_ID" ram.rg= >/dev/null 2>&1',
-    '[ -z "$out" ] && [ "$st" -eq 0 ] && exit 0',
-    '[ -n "$out" ] && printf "%s\\n" "$out"',
-    'exec "${SHELL:-/bin/sh}" -il']);
+  // (The side column as it was, so the peek strip's height is as before.)
+  R(side, { role: "side" }); R(map, {}); await settle();
 }
-console.log("PASS: ^b / and the space level's rg-fzf button: rg-fzf in a tab at the repo (else the folder), one per folder, lit while it runs, in meta unless e is on; Esc closes it and you're back; a pick stays printed in a plain shell tab");
+console.log("PASS: ^b / and the space level's / search: the search window over the window, for the terminal you're in (its folder and repo; no terminal: the space's repo, picks copied); the level stays");
+
+// ---- The search window itself (role search) ------------------------------------------------
+{
+  const DIR = n => `/tmp/T/ram-search.R${String(n).padStart(5, "0")}`;
+  const runs = [], stops = [], bats = [], rgJson = [];
+  host.execHook = (command, args, opts) => {
+    if (command === "sh" && args[1] === S.RUN_SH) {
+      const n = runs.push({ args: args.slice(3), opts });
+      return { code: 0, stdout: `${4000 + n}\n${DIR(n)}\n`, stderr: "" };
+    }
+    if (command === "sh" && args[1] === S.STOP_SH) { stops.push(args.slice(3)); return { code: 0, stdout: "", stderr: "" }; }
+    if (command === "env" && args[1] === "bat") { bats.push({ args, opts }); return { code: 0, stdout: batText(args), stderr: "" }; }
+    if (command === "rg" && args[0] === "--json") { rgJson.push({ args, opts }); return { code: 0, stdout: host.rgJsonOut ?? "", stderr: "" }; }
+    return null;
+  };
+  const filesBefore = host.files;
+  host.files = {};
+  host.bindings = [];
+  let batText = a => {
+    const [from, to] = a[a.indexOf("--line-range") + 1].split(":").map(Number);
+    return Array.from({ length: Math.min(to, 5) - from + 1 }, (_, i) => from + i === 4 ? "x".repeat(200)
+      : from + i === 5 ? "\x1b[38;5;196mred\x1b[0m" : `\x1b[38;2;117;113;94m// line ${from + i}\x1b[0m`).join("\n") + "\n";
+  };
+  const M = "\x1b[0m\x1b[1m\x1b[31m", E = "\x1b[0m";
+  const line = (f, l, c, text) => [f, l, c, text].join("\x1f");
+  const props0 = { role: "search", at: 111, space: "s0", name: "api", machine: null, overlay: "o9",
+    target: { pane: "shell-pane", terminal: "shell" }, folder: "/repo/api/src", repo: "/repo/api" };
+  host.shared.set(S.SEARCH_TOP, 111);
+  host.shared.delete(S.SEARCH_LAST);
+  host.keyboard = null;
+  const sv = view(props0);
+  await settle();
+  const SV = () => R(sv, props0);
+  const poll = host.timers.filter(t => t.ms === 40).at(-1).fn;
+  const look = async () => { await poll(cx); await settle(); };
+  const keyOn = (tree, keystroke, extra = {}) => {
+    host.stopped = false;
+    withId(tree, "ram-search").handlers.on_key_down({ key: keystroke.split("-").pop(), keystroke, modifiers: {}, ...extra }, cx);
+  };
+  const press = async (keystroke, extra) => { keyOn(SV(), keystroke, extra); await settle(); };
+  const type = async text => { for (const ch of text) { keyOn(SV(), ch, { key_char: ch }); await settle(); } };
+  const args = n => runs[n - 1].args;
+  // It takes the keyboard, binds tab and shift-tab in its own key context (the
+  // UI kit's root would take them), and searches at once: the repo, an empty
+  // query (the files), every option off.
+  assert.equal(host.keyboard, sv.searchView.handle, "the window has the keyboard");
+  assert.deepEqual(host.bindings, [{ keystroke: "tab", action: "ram_search.next", context: "RamSearch" },
+    { keystroke: "shift-tab", action: "ram_search.prev", context: "RamSearch" }]);
+  let tree = SV();
+  assert.deepEqual(op(withId(tree, "ram-search"), "key_context"), ["RamSearch"]);
+  assert(withId(tree, "ram-search").handlers["on_action:ram_search.next"] && withId(tree, "ram-search").handlers["on_action:ram_search.prev"]);
+  assert.equal(runs.length, 1, "one run");
+  assert.deepEqual(args(1), ["", "", "content", "", "", "", "", "default", "", "", "1"], "nothing to stop, the files, a sweep of old folders");
+  assert.deepEqual(runs[0].opts, { cwd: "/repo/api", on: null }, "in the repo");
+  assert(textOf(tree).includes("Searching\u2026"), "nothing yet");
+  // Results stream in: whole lines only, chunk after chunk.
+  host.files[`${DIR(1)}/000000`] = "src/main.rs\nREADME.md\nsrc/li";
+  await look();
+  assert.deepEqual(sv.searchView.rows.map(r => r.file), ["src/main.rs", "README.md"], "the whole lines so far");
+  host.files[`${DIR(1)}/000000`] = "src/main.rs\nREADME.md\nsrc/lib.rs\n";
+  host.files[`${DIR(1)}/end`] = "";
+  await look();
+  assert.deepEqual(sv.searchView.rows.map(r => [r.kind, r.file]), [["file", "src/main.rs"], ["file", "README.md"], ["file", "src/lib.rs"]]);
+  tree = SV();
+  assert.equal(textOf(withId(tree, "search-count")).join(""), "3 files", "done: how many");
+  assert(withId(tree, "search-row-0") && withId(tree, "search-row-2") && !withId(tree, "search-row-3"));
+  // A chunk that's full means the next one: a run's lines come in files of CHUNK.
+  // Typing searches again: the run before is stopped by the next one's script,
+  // and its rows stay until the new one's first lines.
+  await type("hel");
+  assert.equal(sv.searchView.field(), "hel");
+  assert.deepEqual(args(2).slice(0, 4), ["4001", DIR(1), "content", "h"], "the first key: run 2 stops run 1");
+  assert.deepEqual(args(4).slice(0, 4), ["4003", DIR(3), "content", "hel"], "each key, the newest wins");
+  assert.equal(sv.searchView.rows.length, 3, "the files stay until the new lines come");
+  {
+    // In words on every part: the pick boxes' and the clear button's tooltips too.
+    const t2 = SV(), tips = flatten(t2).flatMap(n => n.ops.filter(o => o[0] === "tooltip").map(o => o[1]));
+    assert(withId(t2, "search-pick-0") && withId(t2, "search-clear"), "(rows and a query, so both show)");
+    for (const x of [...textOf(t2), ...tips]) assert(!/[\u2325\u21e5\u21e7\u23ce\u2318\u232b]|\^[a-z]/.test(x), `in words: ${x}`);
+    assert.equal(op(withId(t2, "search-clear"), "tooltip")[0], "Clear the query  Cmd-Backspace");
+    assert.equal(op(withId(t2, "search-pick-0"), "tooltip")[0], "Pick  Tab");
+  }
+  host.files[`${DIR(4)}/000000`] = [line("src/main.rs", 2, 15, `    println!("${M}hel${E}lo");`),
+    line("a.txt", 1, 1, `${M}Hel${E}lo world`), line("a.txt", 3, 11, `\tindented ${M}hel${E}lo`)].join("\n") + "\n";
+  host.files[`${DIR(4)}/end`] = "";
+  await look();
+  const rows = sv.searchView.rows;
+  assert.deepEqual(rows.map(r => [r.kind, r.file, r.line, r.col]), [["match", "src/main.rs", 2, 15], ["match", "a.txt", 1, 1], ["match", "a.txt", 3, 11]]);
+  tree = SV();
+  assert.equal(textOf(withId(tree, "search-count")).join(""), "3 lines");
+  const r0 = withId(tree, "search-row-0");
+  assert.deepEqual(textOf(r0), ["src/", "main.rs", ":2:15", "println!(\"", "hel", "lo\");"], "where it is, then the line, its indent dropped");
+  assert(flatten(r0).some(n => n.kids.includes("hel") && op(n, "text_color")?.[0] === "#ffb547"), "the match in amber");
+  assert.deepEqual(op(r0, "bg"), ["#ffb5471f"], "the cursor's row is lit");
+  // The preview: bat, around the line, in its colors; the line lit, numbered.
+  tree = SV(); await settle(); tree = SV();
+  const batMain = bats.find(b => b.args.at(-1) === "src/main.rs");
+  assert.deepEqual(batMain.args, ["COLORTERM=truecolor", "bat", "--color=always", "--paging=never", "--wrap=never", "--style=plain", "--tabs=4",
+    "--line-range", "1:331", "--", "src/main.rs"], "bat for the file, plain style (the window draws the rest), your theme");
+  assert.deepEqual(batMain.opts, { cwd: "/repo/api", on: null, timeout: 15000 });
+  assert.equal(bats.filter(b => b.args.at(-1) === "src/main.rs").length, 1, "once: its lines are kept while the window is open");
+  const pv = withId(tree, "search-pv");
+  assert(pv, "the preview shows");
+  assert.deepEqual(textOf(withId(pv, "search-pv-head")), ["src/main.rs:2", "1\u20135"]);
+  const pvLine = withId(pv, "search-pv-2-0");
+  assert.deepEqual(textOf(pvLine), ["2", "// line 2"], "its number, then bat's text");
+  assert.deepEqual(op(pvLine, "bg"), ["#ffb5472e"], "the match's line is lit");
+  assert(flatten(pvLine).some(n => n.kids.includes("// line 2") && op(n, "text_color")?.[0] === "#75715e"), "in bat's color");
+  assert(!withId(pv, "search-pv-6-0"), "the file ends at 5");
+  assert(flatten(withId(pv, "search-pv-5-0")).some(n => n.kids.includes("red") && op(n, "text_color")?.[0] === "#ff0000"), "256 colors too");
+  // A long line is cut at the preview's edge; ⌥w wraps it (rows that continue it
+  // have no number).
+  assert(withId(SV(), "search-pv-4-0") && !withId(SV(), "search-pv-4-1"), "cut");
+  await press("alt-w");
+  tree = SV();
+  assert(withId(tree, "search-pv-4-2") && !withId(tree, "search-pv-4-3"), "wrapped: 200 characters on three rows");
+  assert.deepEqual(textOf(withId(tree, "search-pv-4-1"))[0], "", "no number on the rows that continue it");
+  await press("alt-w");
+  // ⌥n: no numbers; ⌥w: wrapped; ^p: no preview (and back).
+  await press("alt-n");
+  assert.deepEqual(textOf(withId(SV(), "search-pv-2-0")), ["// line 2"]);
+  await press("alt-n");
+  await press("ctrl-p");
+  assert(!withId(SV(), "search-pv"), "^p hides the preview");
+  await press("ctrl-p");
+  assert(withId(SV(), "search-pv"));
+  // Moving: the cursor and the preview go along; bat runs again for another file only.
+  bats.length = 0;
+  await press("down");
+  tree = SV(); await settle();
+  assert.equal(sv.searchView.cursor, 1);
+  assert.deepEqual(bats.map(b => b.args.at(-1)), ["a.txt"], "a.txt's lines");
+  bats.length = 0;
+  await press("down"); SV(); await settle();
+  assert.deepEqual(bats.length, 0, "the same file's lines are kept");
+  assert.deepEqual(op(withId(SV(), "search-pv-3-0"), "bg"), ["#ffb5472e"], "its line lit now");
+  await press("up"); await press("up"); await press("up");
+  assert.equal(sv.searchView.cursor, 0, "the first row is as far as it goes");
+  // ⇥ (bound, as an action): pick and go down; ⇧⇥ pick and go up; ^a all; ^z none.
+  withId(SV(), "ram-search").handlers["on_action:ram_search.next"]({ action: "ram_search.next" }, cx);
+  assert.deepEqual([...sv.searchView.picked].map(k => k.split("\x1f")[0]), ["src/main.rs"]);
+  assert.equal(sv.searchView.cursor, 1);
+  keyOn(SV(), "tab");
+  assert.equal(sv.searchView.picked.size, 2, "a tab that comes as a key works too");
+  keyOn(SV(), "shift-tab");
+  assert.deepEqual([sv.searchView.picked.size, sv.searchView.cursor], [3, 1], "\u21e7\u21e5: picks and goes up");
+  withId(SV(), "ram-search").handlers["on_action:ram_search.prev"]({ action: "ram_search.prev" }, cx);
+  assert.deepEqual([sv.searchView.picked.size, sv.searchView.cursor], [2, 0], "as the bound action too");
+  keyOn(SV(), "down");
+  tree = SV();
+  assert.equal(textOf(withId(tree, "search-picked")).join(""), "2 picked");
+  assert.deepEqual(op(withId(tree, "search-pick-0"), "bg"), ["#ffb547"], "a picked row's box is filled");
+  keyOn(SV(), "ctrl-z");
+  assert.equal(sv.searchView.picked.size, 0);
+  keyOn(SV(), "ctrl-a");
+  assert.equal(sv.searchView.picked.size, 3);
+  keyOn(SV(), "ctrl-z");
+  // A click on a row: the cursor there; on its box: picked; a double-click: ^e.
+  click(SV(), "search-pick-2");
+  assert.equal(sv.searchView.picked.size, 1);
+  click(SV(), "search-pick-2");
+  assert.equal(sv.searchView.picked.size, 0);
+  withId(SV(), "search-row-2").handlers.on_click({ click_count: 1, modifiers: {} }, cx);
+  assert.equal(sv.searchView.cursor, 2);
+  // Enter: the files (picked, else this row's), as shell words, at the prompt you
+  // came from: its pane gets the keyboard, Herdr pastes, then the window closes.
+  host.events = []; host.calls = []; host.clipboard = null;
+  keyOn(SV(), "enter"); await settle();
+  assert.equal(host.clipboard, "/repo/api/a.txt", "a.txt isn't under src (where the terminal is): its whole path");
+  assert.deepEqual(host.events, ["run pane.focus", "run terminal.paste", "close o9"], "focus, paste, then close");
+  assert.deepEqual(host.calls.slice(0, 2), [{ name: "pane.focus", args: { pane: "shell-pane" } }, { name: "terminal.paste", args: undefined }]);
+  // The terminal at the repo's top: paths as found.
+  const shellPaneOf = panes.find(p => p.pane === "shell-pane");
+  shellPaneOf.cwd = "/repo/api";
+  const sv2 = view(props0); await settle();
+  const SV2 = () => R(sv2, props0);
+  assert.deepEqual(runs.at(-1).args.slice(2, 4), ["content", "hel"], "the space's last search, again");
+  const D2 = DIR(runs.length);
+  host.files[`${D2}/000000`] = [line("we ird.txt", 1, 5, `x ${M}hel${E}lo`), line("src/main.rs", 2, 15, `${M}hel${E}lo`),
+    line("src/main.rs", 9, 1, `${M}hel${E}p`)].join("\n") + "\n";
+  host.files[`${D2}/end`] = "";
+  await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle();
+  const k2 = (ks, extra = {}) => withId(SV2(), "ram-search").handlers.on_key_down({ key: ks.split("-").pop(), keystroke: ks, modifiers: {}, ...extra }, cx);
+  k2("ctrl-a"); host.clipboard = null;
+  k2("enter"); await settle();
+  assert.equal(host.clipboard, "src/main.rs 'we ird.txt'", "each file once, sorted, quoted where it must be");
+  // ^o: the lines, file:line:column:text, one a line.
+  const sv3 = view(props0); await settle();
+  const D3 = DIR(runs.length);
+  host.files[`${D3}/000000`] = host.files[`${D2}/000000`]; host.files[`${D3}/end`] = "";
+  await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle();
+  const k3 = (ks, extra = {}) => withId(R(sv3, props0), "ram-search").handlers.on_key_down({ key: ks.split("-").pop(), keystroke: ks, modifiers: {}, ...extra }, cx);
+  k3("ctrl-a"); k3("ctrl-o"); await settle();
+  assert.equal(host.clipboard, "we ird.txt:1:5:x hello\nsrc/main.rs:2:15:hello\nsrc/main.rs:9:1:help", "in the list's order");
+  // ⌥⏎: JSON, the whole lines and matches from ripgrep's own JSON.
+  const sv4 = view(props0); await settle();
+  const D4 = DIR(runs.length);
+  host.files[`${D4}/000000`] = host.files[`${D2}/000000`]; host.files[`${D4}/end`] = "";
+  await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle();
+  host.rgJsonOut = [
+    JSON.stringify({ type: "match", data: { path: { text: "src/main.rs" }, lines: { text: "hello there\n" }, line_number: 2, submatches: [{ match: { text: "hel" } }] } }),
+    JSON.stringify({ type: "summary", data: {} })].join("\n");
+  withId(R(sv4, props0), "ram-search").handlers.on_key_down({ key: "a", keystroke: "ctrl-a", modifiers: { control: true } }, cx);
+  withId(R(sv4, props0), "ram-search").handlers.on_key_down({ key: "enter", keystroke: "alt-enter", modifiers: { alt: true } }, cx); await settle();
+  assert.deepEqual(rgJson.at(-1).args, ["--json", "--engine", "default", "--ignore-case", "-e", "hel", "--", "we ird.txt", "src/main.rs"]);
+  assert.deepEqual(JSON.parse(host.clipboard).results, [{ file: "we ird.txt", line: 1, column: 5, text: "x hello", matches: [] },
+    { file: "src/main.rs", line: 2, column: 15, text: "hello there", matches: ["hel"] },
+    { file: "src/main.rs", line: 9, column: 1, text: "help", matches: [] }], "ripgrep's whole line and matches where it has them");
+  assert.deepEqual(JSON.parse(host.clipboard).query, "hel");
+  assert.equal(host.clipboard.split("\n")[1], '  "query": "hel",', "two spaces, as jq writes it");
+  // The terminal's pane is gone (closed meanwhile): copied instead.
+  const svGone = view({ ...props0, target: { pane: "pGONE", terminal: "tGONE" } }); await settle();
+  const DG = DIR(runs.length);
+  host.files[`${DG}/000000`] = host.files[`${D2}/000000`]; host.files[`${DG}/end`] = "";
+  await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle();
+  host.calls = []; host.notes = [];
+  withId(R(svGone, props0), "ram-search").handlers.on_key_down({ key: "enter", keystroke: "enter", modifiers: {} }, cx); await settle();
+  assert.deepEqual([host.calls.filter(c => c.name === "terminal.paste").length, host.notes.at(-1)?.title], [0, "Copied"], "its pane is gone: copied");
+  // ⌥c: copied instead (a toast says so), nothing pasted.
+  const sv5 = view(props0); await settle();
+  const D5 = DIR(runs.length);
+  host.files[`${D5}/000000`] = host.files[`${D2}/000000`]; host.files[`${D5}/end`] = "";
+  await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle();
+  const k5 = (ks, extra = {}) => withId(R(sv5, props0), "ram-search").handlers.on_key_down({ key: ks.split("-").pop(), keystroke: ks, modifiers: {}, ...extra }, cx);
+  k5("alt-c");
+  assert.deepEqual(op(withId(R(sv5, props0), "search-copy"), "border_color"), ["#ffb547"], "copy is lit");
+  host.calls = []; host.notes = [];
+  k5("enter"); await settle();
+  assert.deepEqual([host.clipboard, host.calls.filter(c => c.name === "terminal.paste").length, host.notes.at(-1)?.title], ["'we ird.txt'", 0, "Copied"]);
+  assert.equal(host.shared.get(S.SEARCH_LAST).look.copy, true, "and the next window copies too");
+  // ^e: $EDITOR at the line, in a new tab of the space, in the folder searched.
+  const sv6 = view(props0); await settle();
+  const D6 = DIR(runs.length);
+  host.files[`${D6}/000000`] = host.files[`${D2}/000000`]; host.files[`${D6}/end`] = "";
+  await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle();
+  assert.deepEqual(op(withId(R(sv6, props0), "search-copy"), "border_color"), ["#ffb547"], "a new window copies too (as it was left)");
+  // A cmd-click (or ctrl or shift) on a row picks it, as \u21e5 does.
+  withId(R(sv6, props0), "search-row-0").handlers.on_click({ click_count: 1, modifiers: { platform: true } }, cx);
+  assert.equal(sv6.searchView.picked.size, 1);
+  withId(R(sv6, props0), "search-row-0").handlers.on_click({ click_count: 1, modifiers: { platform: true } }, cx);
+  assert.equal(sv6.searchView.picked.size, 0);
+  host.calls = []; host.closed = [];
+  withId(R(sv6, props0), "search-row-2").handlers.on_click({ click_count: 2, modifiers: {} }, cx);
+  assert.deepEqual(host.calls.at(-1), { name: "tab.new", args: { space: "s0", name: "main.rs", folder: "/repo/api",
+    argv: ["exec", "sh", "-c", S.EDIT_SH, "sh", "9", "src/main.rs"] } }, "a double-click opens it as ^e does, at its line");
+  assert.equal(S.EDIT_SH, 'exec ${EDITOR:-vim} "+$1" "$2"', "the line first, as rg-fzf's ^e");
+  assert.deepEqual(host.closed, ["o9"], "and the window closes");
+  // Closing stops its run and keeps the search for this space.
+  stops.length = 0;
+  await sv6.close();
+  assert.deepEqual(stops, [[String(4000 + runs.length), D6, ""]], "its run stopped, its folder removed");
+  const kept = host.shared.get(S.SEARCH_LAST).spaces.s0;
+  assert.deepEqual(kept, { q: "hel", fq: "", mode: "content", hidden: false, invert: false, pcre2: false, unique: false, scope: "repo" });
+  delete shellPaneOf.cwd;
+  host.files = filesBefore;
+  host.execHook = null;
+}
+console.log("PASS: the search window: results stream in from its run's files, typing starts a new run that stops the last, bat's preview at the line; keys and clicks pick, Enter/^o/⌥⏎ paste files/lines/JSON at the prompt you came from (⌥c copies), ^e or a double-click edits; closing stops the run and keeps the search");
+
+{
+  // Options and modes: each a key and a button; the run gets them.
+  const DIR = n => `/tmp/T/ram-search.R${String(n).padStart(5, "0")}`;
+  const runs = [];
+  host.execHook = (command, args, opts) => {
+    if (command === "sh" && args[1] === S.RUN_SH) { const n = runs.push({ args: args.slice(3), opts }); return { code: 0, stdout: `${7000 + n}\n${DIR(n)}\n`, stderr: "" }; }
+    if (command === "sh" && args[1] === S.STOP_SH) return { code: 0, stdout: "", stderr: "" };
+    return null;
+  };
+  host.shared.delete(S.SEARCH_LAST);
+  const p = { role: "search", at: 222, space: "s1", name: "web", machine: null, overlay: "o10",
+    target: { pane: "shell-pane", terminal: "shell" }, folder: "/repo/web/app", repo: "/repo/web" };
+  host.shared.set(S.SEARCH_TOP, 222);
+  const sv = view(p); await settle();
+  const T = () => R(sv, p);
+  const k = (ks, extra = {}) => { withId(T(), "ram-search").handlers.on_key_down({ key: ks.split("-").pop(), keystroke: ks, modifiers: {}, ...extra }, cx); };
+  const last = () => runs.at(-1).args;
+  for (const ch of "foo") k(ch, { key_char: ch });
+  await settle();
+  assert.deepEqual(last().slice(2, 11), ["content", "foo", "", "", "", "default", "", "", ""]);
+  assert.deepEqual([runs.length, last().slice(0, 2)], [3, [String(7002), DIR(2)]],
+    "typed while a run started: only the newest query runs next, and it stops the one that started");
+  k("alt-v"); await settle(); assert.equal(last()[6], "1", "\u2325v invert");
+  k("alt-i"); await settle(); assert.equal(last()[5], "1", "\u2325i hidden");
+  k("alt-p"); await settle(); assert.equal(last()[7], "pcre2", "\u2325p PCRE2");
+  k("alt-u"); await settle(); assert.equal(last()[8], "1", "\u2325u one per file");
+  let tree = T();
+  for (const id of ["search-invert", "search-hidden", "search-pcre2", "search-unique"])
+    assert.deepEqual(op(withId(tree, id), "border_color"), ["#ffb547"], `${id} lit`);
+  assert(textOf(withId(tree, "search-mode")).includes("Content (pcre2)"), "the mode says which engine");
+  // Its buttons do the same.
+  for (const id of ["search-invert", "search-hidden", "search-pcre2", "search-unique"]) click(T(), id);
+  await settle();
+  assert.deepEqual(last().slice(5, 9), ["", "", "default", ""], "a click toggles each back");
+  // ^f: filename mode, with its own query (fzf's match on the file's name); the
+  // content query stays, and the run filters what it finds by name.
+  k("ctrl-f");
+  assert.equal(sv.searchView.field(), "", "the name query is its own");
+  for (const ch of "ma") k(ch, { key_char: ch });
+  await settle();
+  assert.deepEqual(last().slice(2, 5), ["filename", "foo", "ma"]);
+  assert(textOf(withId(T(), "search-mode")).includes("Filename (fuzzy)"));
+  k("ctrl-f"); await settle();
+  assert.deepEqual([sv.searchView.field(), last().slice(2, 5)], ["foo", ["content", "foo", "ma"]], "back in content mode: the name query picks the files searched");
+  click(T(), "search-mode"); await settle();
+  assert.equal(last()[2], "filename", "the mode's button does it too");
+  click(T(), "search-mode"); await settle();
+  // ⌥s: the folder you're in instead of the repo (and back); its button too.
+  k("alt-s"); await settle();
+  assert.deepEqual(runs.at(-1).opts, { cwd: "/repo/web/app", on: null }, "the folder");
+  assert(textOf(withId(T(), "search-scope")).includes("folder"));
+  click(T(), "search-scope"); await settle();
+  assert.deepEqual(runs.at(-1).opts, { cwd: "/repo/web", on: null }, "the repo");
+  // Editing the query: the cursor moves, words go, the clipboard pastes; a click puts the cursor there.
+  k("left"); k("left"); k("x", { key_char: "x" });
+  assert.deepEqual([sv.searchView.field(), sv.searchView.at], ["fxoo", 2]);
+  k("alt-backspace");
+  assert.deepEqual([sv.searchView.field(), sv.searchView.at], ["oo", 0]);
+  host.clipboard = "bar\n"; k("cmd-v");
+  assert.deepEqual([sv.searchView.field(), sv.searchView.at], ["bar oo", 4]);
+  k("backspace");
+  assert.deepEqual([sv.searchView.field(), sv.searchView.at], ["baroo", 3], "backspace takes the character before the cursor");
+  k("ctrl-x", { key_char: "x", modifiers: { control: true } });
+  k("alt-x", { key_char: "x", modifiers: { alt: true } });
+  assert.equal(sv.searchView.field(), "baroo", "ctrl keys and Option as Alt (its plain letter) type nothing");
+  k("alt-x", { key_char: "\u2248", modifiers: { alt: true } });
+  assert.deepEqual([sv.searchView.field(), sv.searchView.at], ["bar\u2248oo", 4], "where Option types (\u2248), it's typed");
+  withId(T(), "search-field").handlers["on_mouse_down:left"]({ local_position: { x: 2.2 * 12 * 1.25 * 0.6 } }, cx);
+  assert.equal(sv.searchView.at, 2, "a click between characters");
+  click(T(), "search-clear"); await settle();
+  assert.deepEqual([sv.searchView.field(), last()[3]], ["", ""], "\u2715 clears it: the files again");
+  // \u2325/ and F1: every key, each a button that does it.
+  k("alt-/");
+  tree = T();
+  assert(withId(tree, "search-keylist"), "the key list");
+  for (const [, action] of S.KEYS) assert(withId(tree, `search-key-${action}`), `the list has ${action}`);
+  assert.deepEqual(textOf(withId(tree, "search-key-keys")).slice(0, 1), ["Alt-/ F1"]);
+  assert.deepEqual(["up", "down", "pageup", "pagedown"].map(a => textOf(withId(tree, `search-key-${a}`))[0]),
+    ["Up Ctrl-K", "Down Ctrl-J Ctrl-N", "PageUp", "PageDown"], "the list's moves are in it too");
+  click(tree, "search-key-down");
+  assert(!withId(T(), "search-keylist"), "a move from the list closes it");
+  k("alt-/"); tree = T();
+  click(tree, "search-key-invert"); await settle();
+  assert.equal(last()[6], "1", "a click on a key in the list does it");
+  assert(!withId(T(), "search-keylist"), "and the list goes");
+  k("f1"); assert(withId(T(), "search-keylist")); k("f1"); assert(!withId(T(), "search-keylist"));
+  // Keys are written in words, as rg-fzf's help writes them (the user's ask), on
+  // the buttons, in their tooltips and in the key list.
+  tree = T();
+  assert.deepEqual([["search-lines"], ["search-json"], ["search-next"], ["search-prev"], ["search-close"], ["search-invert"],
+    ["search-files"], ["search-mode"], ["search-numbers"]].map(([id]) => textOf(withId(tree, id))[0]),
+    ["Ctrl-O", "Alt-Enter", "Tab", "Shift-Tab", "Esc", "Alt-V", "Enter", "Ctrl-F", "Alt-N"]);
+  assert(op(withId(tree, "search-foot"), "flex_wrap") && op(withId(tree, "search-flags"), "flex_wrap"),
+    "the button rows wrap in a narrow window rather than run past its edge");
+  const symbols = /[\u2325\u21e5\u21e7\u23ce\u2318\u232b]|\^[a-z]/;
+  const tips = t2 => flatten(t2).flatMap(n => n.ops.filter(o => o[0] === "tooltip").map(o => o[1]));
+  k("alt-/");
+  for (const t2 of [T(), (k("alt-/"), T())])
+    for (const x of [...textOf(t2), ...tips(t2)]) assert(!symbols.test(x), `in words, not symbols: ${x}`);
+  // Every key has a button on the window (or the wheel: Ctrl-D Ctrl-U scroll the preview).
+  tree = T();
+  const buttons = { files: "search-files", lines: "search-lines", json: "search-json", copy: "search-copy", edit: "search-edit",
+    mode: "search-mode", pcre2: "search-pcre2", invert: "search-invert", hidden: "search-hidden", unique: "search-unique",
+    scope: "search-scope", next: "search-next", prev: "search-prev", all: "search-all", none: "search-none", preview: "search-preview",
+    wrap: "search-wrap", numbers: "search-numbers", keys: "search-keys", close: "search-close" };
+  for (const [, action] of S.KEYS) {
+    if (action === "pvdown" || action === "pvup" || action === "divleft" || action === "divright") continue;
+    assert(withId(tree, buttons[action]), `${action}: a button`);
+    assert.match(op(withId(tree, buttons[action]), "tooltip")[0], /  \S+$/, `${action}'s tooltip ends with its key`);
+  }
+  assert(withId(tree, "search-pv-body") === undefined || withId(tree, "search-pv-body").handlers.on_scroll_wheel, "the preview scrolls with the wheel");
+  // A newer window (^b / again) closes this one.
+  host.closed = [];
+  host.shared.set(S.SEARCH_TOP, 333);
+  T(); await settle();
+  assert.deepEqual(host.closed, ["o10"]);
+  await sv.close();
+  // Options are each space's: s1's are kept, s0's untouched.
+  assert.deepEqual(Object.keys(host.shared.get(S.SEARCH_LAST).spaces), ["s1"]);
+  assert.equal(host.shared.get(S.SEARCH_LAST).spaces.s1.invert, true);
+  host.execHook = null;
+}
+console.log("PASS: the search window's options: \u2325v \u2325i \u2325p \u2325u and their buttons, ^f filename mode with its own query, \u2325s repo or folder, the field's keys and clicks, \u2325/ F1 the key list (each key a button); a newer window closes this one; each space keeps its own");
+
+{
+  // ram-search's tab (a file list piped in): its own pane, which a pick or Esc
+  // closes; its runs search the list from where it ran; closing removes the list.
+  const DIR = n => `/tmp/T/ram-search.L${String(n).padStart(5, "0")}`;
+  const runs = [], stops = [];
+  host.execHook = (command, args, opts) => {
+    if (command === "sh" && args[1] === S.RUN_SH) { const n = runs.push({ args: args.slice(3), opts }); return { code: 0, stdout: `${9000 + n}\n${DIR(n)}\n`, stderr: "" }; }
+    if (command === "sh" && args[1] === S.STOP_SH) { stops.push(args.slice(3)); return { code: 0, stdout: "", stderr: "" }; }
+    return null;
+  };
+  const filesBefore = host.files;
+  host.files = {};
+  host.shared.set(S.SEARCH_LAST, { look: {}, spaces: { s0: { q: "kept", mode: "content" } } });
+  const LIST = "/tmp/T/ram-search-list.AbCdEf";
+  const p = { role: "search", list: LIST, cwd: "/repo/api", target: { pane: null, terminal: "shell" } };
+  host.focused = { space: "s0", tab: "tabS", pane: "pS", terminal: null, cwd: null };
+  const sv = view(p); await settle();
+  const T = () => R(sv, p);
+  const k = (ks, extra = {}) => { withId(T(), "ram-search").handlers.on_key_down({ key: ks.split("-").pop(), keystroke: ks, modifiers: {}, ...extra }, cx); };
+  const poll = host.timers.filter(t => t.ms === 40).at(-1).fn;
+  assert.deepEqual(runs[0].args.slice(2), ["content", "", "", "", "", "default", "", LIST, "1"], "a fresh search (not the space's), on the list");
+  assert.deepEqual(runs[0].opts, { cwd: "/repo/api", on: null }, "from where ram-search ran");
+  assert.equal(sv.searchView.p.space, "s0", "its space: where it opened");
+  assert(textOf(withId(T(), "search-scope")).includes("files given"), "the scope is the list");
+  assert.equal(op(withId(T(), "search-scope"), "cursor_pointer"), undefined, "and can't change");
+  k("alt-s"); await settle();
+  assert.equal(runs.length, 1, "\u2325s does nothing here");
+  // Many results: a full chunk (CHUNK lines) goes on to the next; a run that
+  // stopped at MAX_ROWS says "+".
+  const many = Array.from({ length: S.CHUNK + 3 }, (_, i) => i === 7 ? "caf\ufffd.txt" : `f${String(i).padStart(4, "0")}.txt`);
+  host.files[`${DIR(1)}/000000`] = many.slice(0, S.CHUNK).join("\n") + "\n";
+  // (the second chunk isn't UTF-8: readTextFile refuses it, cat gives it with U+FFFD)
+  const hookBefore = host.execHook, second = many.slice(S.CHUNK).join("\n") + "\n";
+  host.execHook = (command, args, opts) => command === "cat" && args[0] === `${DIR(1)}/000001` ? { code: 0, stdout: second, stderr: "" }
+    : hookBefore(command, args, opts);
+  host.files[`${DIR(1)}/more`] = "";
+  host.files[`${DIR(1)}/end`] = "";
+  await poll(cx); await settle();
+  assert.equal(sv.searchView.rows.length, S.CHUNK + 3, "both chunks read in one look");
+  assert.equal(sv.searchView.rows[7].file, "caf\ufffd.txt");
+  host.execHook = hookBefore;
+  assert.equal(textOf(withId(T(), "search-count")).join(""), `${(S.CHUNK + 3).toLocaleString("en-US")}+ files`, "+: more than it kept");
+  // Its size: as many rows as fit; the wheel scrolls (the cursor stays on screen),
+  // page down jumps a screen.
+  withId(T(), "search-list").handlers.on_size_change({ width: 700, height: 5 * 17 * 1.25 + 4 * 1.25 }, cx);
+  assert.equal(sv.searchView.size.rows, 5);
+  let tree = T();
+  assert(withId(tree, "search-row-4") && !withId(tree, "search-row-5"), "only the rows that fit are drawn");
+  withId(tree, "search-list").handlers.on_scroll_wheel({ delta: { x: 0, y: -3 * 17 * 1.25 } }, cx);
+  assert.deepEqual([sv.searchView.top, sv.searchView.cursor], [3, 3], "the wheel: three rows down, the cursor along");
+  tree = T();
+  assert(withId(tree, "search-row-3") && !withId(tree, "search-row-2") && withId(tree, "search-row-7"));
+  withId(tree, "search-list").handlers.on_scroll_wheel({ delta: { x: 0, y: 1 }, delta_lines: { x: 0, y: 2 } }, cx);
+  assert.equal(sv.searchView.top, 1, "lines from a wheel that counts them");
+  k("pagedown");
+  assert.deepEqual([sv.searchView.cursor, sv.searchView.top], [7, 3], "a screen down, kept in view");
+  k("pageup"); k("pageup");
+  assert.deepEqual([sv.searchView.cursor, sv.searchView.top], [0, 0], "back at the top, and shown");
+  k("ctrl-j"); k("ctrl-n"); k("down");
+  assert.equal(sv.searchView.cursor, 3, "^j ^n and \u2193 go down");
+  k("ctrl-k"); k("up");
+  assert.equal(sv.searchView.cursor, 1, "^k and \u2191 go up");
+  // A new search: its first lines replace the list, the cursor back at the top.
+  k("ctrl-j"); k("ctrl-j");
+  k("f", { key_char: "f" }); await settle();
+  assert.equal(sv.searchView.cursor, 3, "the last search's rows stay meanwhile");
+  host.files[`${DIR(2)}/000000`] = ["f0001.txt", "1", "1", "\x1b[0m\x1b[1m\x1b[31mf\x1b[0m"].join("\x1f") + "\n";
+  host.files[`${DIR(2)}/end`] = "";
+  await poll(cx); await settle();
+  assert.deepEqual([sv.searchView.rows.length, sv.searchView.cursor, sv.searchView.top], [1, 0, 0]);
+  k("backspace"); await settle();
+  host.files[`${DIR(3)}/000000`] = host.files[`${DIR(1)}/000000`];
+  host.files[`${DIR(3)}/end`] = "";
+  await poll(cx); await settle();
+  // A pick goes to ram-search's terminal (by its address: it's not a pane of a
+  // layout block), then its tab's pane closes.
+  host.events = []; host.calls = []; host.clipboard = null;
+  k("enter"); await settle();
+  assert.equal(host.clipboard, "f0000.txt");
+  assert.deepEqual(host.calls, [{ name: "pane.focus", args: { terminal: "shell" } }, { name: "terminal.paste", args: undefined },
+    { name: "pane.close", args: { pane: "pS" } }], "its terminal, paste, then this tab's pane closes");
+  assert.equal(host.shared.get(S.SEARCH_LAST).spaces.s0.q, "kept", "a list's search isn't kept for the space");
+  stops.length = 0;
+  await sv.close();
+  assert.deepEqual(stops, [[String(9003), DIR(3), LIST]], "closing stops its run and removes the list");
+  // Esc in the tab (no dialog: Esc comes as a key) closes it too.
+  const sv2 = view(p); await settle();
+  host.calls = [];
+  withId(R(sv2, p), "ram-search").handlers.on_key_down({ key: "escape", keystroke: "escape", modifiers: {} }, cx);
+  assert.deepEqual(host.calls, [{ name: "pane.close", args: { pane: "pS" } }], "Esc closes its tab");
+  // A run that can't start says why; one that ends with nothing says what rg said.
+  const sv3 = view({ ...p, list: undefined, folder: "/repo/api", repo: "/repo/api" }); await settle();
+  const n3 = runs.length;
+  host.files[`${DIR(n3)}/err`] = "rg: regex parse error:\n    (?:(foo)\n    ^\nerror: unclosed group\n";
+  host.files[`${DIR(n3)}/end`] = "";
+  await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle();
+  tree = R(sv3, { ...p, list: undefined });
+  assert.deepEqual(textOf(withId(tree, "search-empty")), ["rg: regex parse error:\n    (?:(foo)\n    ^\nerror: unclosed group"]);
+  assert.deepEqual(op(withId(tree, "search-empty"), "text_color"), ["#ff5f6d"], "in red");
+  host.execHook = (command, args) => (command === "sh" && args[1] === S.RUN_SH ? { code: 127, stdout: "", stderr: "sh: rg: command not found" } : null);
+  const sv4 = view({ ...p, list: undefined, folder: "/repo/api", repo: "/repo/api" }); await settle();
+  tree = R(sv4, { ...p, list: undefined });
+  assert.deepEqual([textOf(withId(tree, "search-empty")), textOf(withId(tree, "search-count"))], [["sh: rg: command not found"], ["couldn't search"]]);
+  host.files = filesBefore;
+  host.execHook = null;
+  host.focused = null;
+}
+{
+  // The preview scrolls: ^d ^u by half its height, the wheel by lines, down to the
+  // file's last screen; past what bat gave, bat again for those lines.
+  const DIR = n => `/tmp/T/ram-search.P${String(n).padStart(5, "0")}`;
+  const runs = [], bats = [];
+  host.execHook = (command, args, opts) => {
+    if (command === "sh" && args[1] === S.RUN_SH) { const n = runs.push({ args: args.slice(3) }); return { code: 0, stdout: `${5000 + n}\n${DIR(n)}\n`, stderr: "" }; }
+    if (command === "sh" && args[1] === S.STOP_SH) return { code: 0, stdout: "", stderr: "" };
+    if (command === "env" && args[1] === "bat") {
+      bats.push(args);
+      const [from, to] = args[args.indexOf("--line-range") + 1].split(":").map(Number), last = Math.min(to, 2000);
+      return { code: 0, stdout: Array.from({ length: Math.max(0, last - from + 1) }, (_, i) => `line ${from + i}`).join("\n") + "\n", stderr: "" };
+    }
+    return null;
+  };
+  const filesBefore = host.files;
+  host.files = {};
+  host.shared.delete(S.SEARCH_LAST);
+  const p = { role: "search", at: 444, space: "s0", name: "api", machine: null, overlay: "o12", target: null, folder: "/repo/api", repo: "/repo/api" };
+  host.shared.set(S.SEARCH_TOP, 444);
+  const sv = view(p); await settle();
+  const T = () => R(sv, p);
+  sv.searchView.rows = [S.parseRow(["big.txt", "1000", "1", "x"].join("\x1f"), 3)];
+  T(); await settle();
+  withId(T(), "search-pv-body").handlers.on_size_change({ width: 600, height: 20 * 15 * 1.25 + 4 * 1.25 }, cx);
+  assert.equal(sv.searchView.size.pvRows, 20);
+  assert.equal(sv.searchView.pvTop, 1000 - Math.floor(30 / 3), "its line a third down (as sized when it first showed)");
+  const top0 = sv.searchView.pvTop;
+  const key = (ks, n = 1) => { for (let i = 0; i < n; i++) withId(T(), "ram-search").handlers.on_key_down({ key: ks.split("-").pop(), keystroke: ks, modifiers: { control: true } }, cx); };
+  key("ctrl-d");
+  assert.equal(sv.searchView.pvTop, top0 + 10, "^d: half of 20 lines");
+  key("ctrl-u", 2);
+  assert.equal(sv.searchView.pvTop, top0 - 10, "^u twice");
+  withId(T(), "search-pv-body").handlers.on_scroll_wheel({ delta: { x: 0, y: -4 * 15 * 1.25 } }, cx);
+  assert.equal(sv.searchView.pvTop, top0 - 6, "the wheel: four lines down");
+  // Holding ^d: as far as bat's lines go, then bat again for the next ones, to the
+  // file's last screen and no further.
+  const got = bats.length;
+  key("ctrl-d", 100);
+  assert.equal(sv.searchView.pvTop, sv.searchView.pv.get("big.txt").b - 20 + 1, "no further than bat's lines");
+  for (let i = 0; i < 20; i++) { key("ctrl-d", 50); T(); await settle(); }
+  assert(bats.length > got + 1, "bat again for the lines further down");
+  assert.equal(sv.searchView.pvTop, 2000 - 20 + 1, "down to the file's last screen, no further");
+  assert(withId(T(), "search-pv-2000-0") && !withId(T(), "search-pv-2001-0"), "its last line shows");
+  key("ctrl-u", 400);
+  assert.equal(sv.searchView.pvTop, 1, "up to its first line");
+  // No terminal to paste in: the copy button shows it's copying, and can't be turned off.
+  const copy = withId(T(), "search-copy");
+  assert.deepEqual([op(copy, "border_color"), op(copy, "cursor_pointer")], [["#ffb547"], undefined]);
+  await sv.close();
+  host.files = filesBefore;
+  host.execHook = null;
+}
+{
+  // The divider between the list and the preview: a drag moves it (the preview's
+  // edge follows the pointer anywhere in the window until the button goes up),
+  // Alt-[ and Alt-] move it a step, within limits; the next window starts there.
+  const DIR = n => `/tmp/T/ram-search.D${String(n).padStart(5, "0")}`;
+  const runs = [];
+  host.execHook = (command, args) => {
+    if (command === "sh" && args[1] === S.RUN_SH) { const n = runs.push(1); return { code: 0, stdout: `${3000 + n}\n${DIR(n)}\n`, stderr: "" }; }
+    if (command === "sh" && args[1] === S.STOP_SH) return { code: 0, stdout: "", stderr: "" };
+    return null;
+  };
+  host.shared.delete(S.SEARCH_LAST);
+  const p = { role: "search", at: 666, space: "s3", name: "docs", machine: null, overlay: "o14", target: null, folder: "/repo/docs", repo: null };
+  host.shared.set(S.SEARCH_TOP, 666);
+  const sv = view(p); await settle();
+  const T = () => R(sv, p);
+  const k = ks => withId(T(), "ram-search").handlers.on_key_down({ key: ks.split("-").pop(), keystroke: ks, modifiers: { alt: true } }, cx);
+  const pvW = () => op(withId(T(), "search-pv"), "w")[0];
+  withId(T(), "search-body").handlers.on_size_change({ width: 1000, height: 600 }, cx);
+  assert.equal(pvW(), 550, "the preview's share, 55%, by default");
+  let dv = withId(T(), "search-divider");
+  assert(dv && op(dv, "cursor_col_resize"), "between the list and the preview: a divider with a resize cursor");
+  assert.match(op(dv, "tooltip")[0], /Alt-\[ Alt-\]$/, "its keys in its tooltip");
+  assert.deepEqual(flatten(withId(T(), "search-body")).filter(n => idOf(n)).map(idOf).filter(id => ["search-list", "search-divider", "search-pv"].includes(id)),
+    ["search-list", "search-divider", "search-pv"], "list, divider, preview");
+  // The drag: the divider's middle under the pointer (body px, zoom 1).
+  host.keyboard = null;
+  dv.handlers["on_mouse_down:left"]({ position: { x: 0, y: 0 }, local_position: { x: 3, y: 10 }, click_count: 1 }, cx);
+  assert.equal(host.keyboard, sv.searchView.handle, "a press on the divider gives the window the keyboard");
+  const move = (x, pressed = "left") => withId(T(), "search-body").handlers.on_window_mouse_move({ local_position: { x, y: 10 }, pressed_button: pressed }, cx);
+  move(600);
+  assert.equal(pvW(), Math.round(1000 * Math.round((1000 - 600 - 7 * 1.25 / 2) / 1000 * 1000) / 1000), "the preview's edge follows the pointer");
+  assert(flatten(withId(T(), "search-divider")).some(n => op(n, "bg")?.[0] === "#ffb547"), "amber while dragged");
+  move(10);
+  assert.equal(sv.searchView.look.split, S.SPLIT_MAX, "no further than 80%");
+  assert.equal(pvW(), 1000 - 7 * 1.25 - 200 | 0, "and the list keeps its least width");
+  move(990);
+  assert.equal(sv.searchView.look.split, S.SPLIT_MIN, "no less than 20%");
+  move(500);
+  withId(T(), "search-body").handlers["on_window_mouse_up:left"]({}, cx);
+  const kept = sv.searchView.look.split;
+  move(700);
+  assert.equal(sv.searchView.look.split, kept, "the button went up: moving doesn't drag");
+  assert(!flatten(withId(T(), "search-divider")).some(n => op(n, "bg")?.[0] === "#ffb547"), "not amber then");
+  // A release outside the window: the next move without the button ends the drag.
+  withId(T(), "search-divider").handlers["on_mouse_down:left"]({ local_position: { x: 3, y: 10 } }, cx);
+  move(400, null);
+  move(300);
+  assert.equal(sv.searchView.look.split, kept, "no drag after a move without the button");
+  // The keys: a step each way, within the limits.
+  k("alt-[");
+  assert.equal(sv.searchView.look.split, Math.round((kept + S.DIV_STEP) * 1000) / 1000, "Alt-[: the divider left, a wider preview");
+  k("alt-]"); k("alt-]");
+  assert.equal(sv.searchView.look.split, Math.round((kept - S.DIV_STEP) * 1000) / 1000, "Alt-]: right, a wider list");
+  for (let i = 0; i < 20; i++) k("alt-]");
+  assert.equal(sv.searchView.look.split, S.SPLIT_MIN);
+  for (let i = 0; i < 20; i++) k("alt-[");
+  assert.equal(sv.searchView.look.split, S.SPLIT_MAX);
+  k("alt-]");
+  // No preview: no divider, the list has the room.
+  withId(T(), "ram-search").handlers.on_key_down({ key: "p", keystroke: "ctrl-p", modifiers: { control: true } }, cx);
+  assert(!withId(T(), "search-divider") && !withId(T(), "search-pv"), "hidden with the preview");
+  withId(T(), "ram-search").handlers.on_key_down({ key: "p", keystroke: "ctrl-p", modifiers: { control: true } }, cx);
+  // The next window starts where this one left it.
+  const left = sv.searchView.look.split;
+  await sv.close();
+  assert.equal(host.shared.get(S.SEARCH_LAST).look.split, left);
+  const sv2 = view(p); await settle();
+  withId(R(sv2, p), "search-body").handlers.on_size_change({ width: 1000, height: 600 }, cx);
+  assert.equal(op(withId(R(sv2, p), "search-pv"), "w")[0], Math.round(1000 * left), "kept");
+  host.shared.set(S.SEARCH_LAST, { look: { split: 7 } });
+  const sv3 = view(p); await settle();
+  assert.equal(sv3.searchView.look.split, S.SPLIT_MAX, "a kept value out of range comes back within it");
+  host.shared.set(S.SEARCH_LAST, { look: { split: "x" } });
+  assert.equal(view(p).searchView.look.split, S.SPLIT, "a broken one: the default");
+  await settle();
+  host.execHook = null;
+}
+console.log("PASS: the search window's divider: a drag moves it (until the button goes up, even outside the window), Alt-[ Alt-] step it, 20-80% and the list's least width; hidden with the preview; kept for the next window");
+// The run's script: rg-fzf's ripgrep options, the stop of the run before, and what it writes.
+for (const part of [
+  'if [ -n "$old" ] && [ ! -e "$olddir/end" ]; then kill -s TERM -- "-$old" 2>/dev/null; fi',
+  'case $olddir in */ram-search.??????) rm -rf -- "$olddir" 2>/dev/null || { (sleep 1; rm -rf -- "$olddir") </dev/null >/dev/null 2>&1 & } ;; esac',
+  'd=$(mktemp -d "${TMPDIR:-/tmp}/ram-search.XXXXXX") || exit 1', 'echo "$$"', 'echo "$d"',
+  'H=; [ "$hidden" = 1 ] && H=--hidden', 'ff=; [ "$mode" = content ] && ff=$fq', 'meta=3; [ "$invert" = 1 ] && meta=2; [ -z "$q" ] && meta=0',
+  'set -- --engine "$engine" --ignore-case --column --line-number --no-heading --color=always',
+  '--colors path:none --colors line:none --colors column:none --with-filename',
+  "--field-match-separator '\\x1f' --max-columns 500 --max-columns-preview $H",
+  '[ "$invert" = 1 ] && set -- "$@" --invert-match', '[ "$unique" = 1 ] && set -- "$@" --max-count 1', 'set -- "$@" -e "$q"',
+  'if [ -n "$list" ]; then xargs -0 -r rg --files --null $H -- < "$list"; else rg --files --null $H; fi |',
+  'if [ -n "$ff" ]; then fzf --filter "$ff" --read0 --print0 --no-sort; else cat; fi |',
+  'if [ -z "$q" ]; then tr "\\000" "\\n"; else xargs -0 -r rg "$@" --; fi',
+  'elif [ -n "$list" ]; then xargs -0 -r rg "$@" -- < "$list"', 'else rg "$@"',
+  'if [ "$meta" = 0 ]; then fzf --filter "$fq" --no-sort', "else fzf --filter \"$fq\" --delimiter '\\x1f' --nth 1 --no-sort; fi",
+  `awk -v d="$d" -v n=${S.CHUNK} -v max=${S.MAX_ROWS} '`, 'NR > max { printf "" > (d "/more"); exit }',
+  '(NR - 1) % n == 0 { if (f != "") close(f); f = sprintf("%s/%06d", d, int((NR - 1) / n)) }', '{ print > f; fflush(f) }',
+  '} 2> "$d/err"', ': > "$d/end"', ') < /dev/null > /dev/null 2>&1 &'])
+  assert(S.RUN_SH.includes(part), `the run's script has: ${part}`);
+assert.deepEqual(S.STOP_SH.split("\n"), ['if [ -n "$1" ] && [ ! -e "$2/end" ]; then kill -s TERM -- "-$1" 2>/dev/null; fi',
+  'case $2 in */ram-search.??????) rm -rf -- "$2" 2>/dev/null || { (sleep 1; rm -rf -- "$2") </dev/null >/dev/null 2>&1 & } ;; esac',
+  'case $3 in */ram-search-list.??????) rm -f -- "$3" ;; esac']);
+{
+  // Inverted lines (no column, no matches), a tab inside a line, a file whose name
+  // reads as an option.
+  const DIR = n => `/tmp/T/ram-search.V${String(n).padStart(5, "0")}`;
+  const runs = [], rgJson = [];
+  host.execHook = (command, args) => {
+    if (command === "sh" && args[1] === S.RUN_SH) { const n = runs.push({ args: args.slice(3) }); return { code: 0, stdout: `${6000 + n}\n${DIR(n)}\n`, stderr: "" }; }
+    if (command === "sh" && args[1] === S.STOP_SH) return { code: 0, stdout: "", stderr: "" };
+    if (command === "rg") { rgJson.push(args); return { code: 0, stdout: "", stderr: "" }; }
+    return null;
+  };
+  const filesBefore = host.files;
+  host.files = {};
+  host.shared.set(S.SEARCH_LAST, { look: {}, spaces: { s2: { q: "x", invert: true } } });
+  const p = { role: "search", at: 555, space: "s2", name: "ops", machine: null, overlay: "o13",
+    target: { pane: "shell-pane", terminal: "shell" }, folder: "/repo/ops", repo: "/repo/ops" };
+  host.shared.set(S.SEARCH_TOP, 555);
+  const fresh = async () => {
+    const v = view(p); await settle();
+    host.files[`${DIR(runs.length)}/000000`] = ["-dash.txt\x1f3\x1fa\tb", "src/x.rs\x1f1\x1fno match here"].join("\n") + "\n";
+    host.files[`${DIR(runs.length)}/end`] = "";
+    await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle();
+    const k = (ks, extra = {}) => withId(R(v, p), "ram-search").handlers.on_key_down({ key: ks.split("-").pop(), keystroke: ks, modifiers: {}, ...extra }, cx);
+    return { v, k };
+  };
+  let { v, k } = await fresh();
+  assert.deepEqual([runs[0].args[3], runs[0].args[6]], ["x", "1"], "the space's search again: invert on");
+  assert.deepEqual(v.searchView.rows.map(r => [r.kind, r.file, r.line, r.col]), [["line", "-dash.txt", 3, null], ["line", "src/x.rs", 1, null]]);
+  assert.deepEqual(textOf(withId(R(v, p), "search-row-0")), ["-dash.txt", ":3", "a   b"], "no column; a tab is 4 spaces");
+  k("ctrl-a"); k("ctrl-o"); await settle();
+  assert.equal(host.clipboard, "./-dash.txt:3:a\tb\nsrc/x.rs:1:no match here", "file:line:text, the tab as it is");
+  ({ v, k } = await fresh());
+  k("ctrl-a"); k("enter"); await settle();
+  assert.equal(host.clipboard, "./-dash.txt src/x.rs", "a name like an option starts with ./");
+  ({ v, k } = await fresh());
+  k("ctrl-a"); k("alt-enter", { key: "enter", modifiers: { alt: true } }); await settle();
+  assert.deepEqual(JSON.parse(host.clipboard).results, [{ file: "./-dash.txt", line: 3, text: "a\tb" }, { file: "src/x.rs", line: 1, text: "no match here" }],
+    "inverted lines: file, line, text");
+  assert.equal(rgJson.length, 0, "no ripgrep JSON for them (they have no matches)");
+  // macOS's /private/var is /var (and /private/tmp /tmp): paths come out relative either way.
+  assert.equal(S.pathFor("src/a.rs", "/private/var/x/repo", "/var/x/repo/src"), "a.rs");
+  assert.equal(S.pathFor("lib/c.rs", "/private/tmp/r", "/tmp/r/src"), "/tmp/r/lib/c.rs", "outside it: the whole path (one spelling)");
+  assert.equal(S.pathFor("src/a.rs", "/var/x/repo", "/private/var/x/repo/src"), "a.rs", "/private on the terminal's side");
+  assert.equal(S.pathFor("/private/tmp/r/b.rs", "/tmp/r", "/tmp/r"), "b.rs", "a name given whole with /private");
+  ({ v, k } = await fresh());
+  host.calls = [];
+  k("ctrl-e");
+  assert.deepEqual(host.calls.at(-1)?.args?.argv, ["exec", "sh", "-c", S.EDIT_SH, "sh", "3", "./-dash.txt"]);
+  host.files = filesBefore;
+  host.execHook = null;
+}
+console.log("PASS: the search window in ram-search's tab (a list, its terminal, Esc and picks close the tab, the list removed); results past a chunk, + at the cap, errors; the wheel, page keys and sizes; the preview's ^d ^u and wheel; the run's script");
 
 // ---- LANG: the space's repo by language, under GIT (space level) ---------------------------
 {
@@ -2637,7 +3282,9 @@ assert.equal(level(), "space", "no hunk level");
 host.calls = [];
 R(map, {});
 await settle();
-assert.deepEqual(layoutCalls(), [{ name: "layout.show", args: { id: "ram-peek" } }], "nothing resizes; the peek strip shows (where you came from)");
+// (The peek strip may take its kept height, ram.peek.h, the first time it shows.)
+const keptPeek = c => c.name === "layout.resize" && c.args.id === "ram-peek" && c.args.px === host.shared.get("ram.peek.h");
+assert.deepEqual(layoutCalls().filter(c => !keptPeek(c)), [{ name: "layout.show", args: { id: "ram-peek" } }], "nothing resizes; the peek strip shows (where you came from)");
 assert.equal(host.shared.get("ram.bp").s0, "tab0-0", "the review's tab isn't a BP");
 assert.deepEqual(host.shared.get("ram.came"), { level: "space", space: "s0", tab: "tab0-0", pane: null }, "where you came from is kept");
 assert.deepEqual(host.shared.get("ram.hunk.last"), { s0: "tabNEW" }, "it's the space's last review");
@@ -2961,8 +3608,8 @@ console.log("PASS: the peek strip is as tall as the side column from the line ov
   await take("focus");
   assert(ks.handle.is_focused(), "\"focus\" (pane.go into the column): it takes the keyboard");
   kt = KS();
-  assert.deepEqual(outlined(kt), ["ram-rg"], "its first part is outlined: rg-fzf's button");
-  assert.deepEqual(textOf(withId(kt, "ram-kb-keys")), ["\u2191\u2193", "move", "\u23ce", "rg-fzf", "esc", "back"], "the bottom row: its keys");
+  assert.deepEqual(outlined(kt), ["ram-rg"], "its first part is outlined: search's button");
+  assert.deepEqual(textOf(withId(kt, "ram-kb-keys")), ["\u2191\u2193", "move", "\u23ce", "search", "esc", "back"], "the bottom row: its keys");
   assert(!withId(kt, "ram-settings"), "instead of Settings, Keys and Commands");
   press("down");
   assert.deepEqual(outlined(KS()), ["ram-space-new"], "down: the next");
@@ -3169,11 +3816,11 @@ console.log("PASS: RAM's right-click menu: Copy and Paste (on the terminal right
     e: "ram.enter", "shift-i": "ram.bp", "shift-p": "ram.peek", m: "ram.meta", i: "ram.space", r: "ram.hunk", f: "ram.follow",
     g: "lazygit", "/": "rg", d: "ram.changes", b: "layout.toggle:sidebar", w: "navigate", h: "pane.go:left" };
   for (const [k, action] of Object.entries(want)) assert.equal(bar[k], `${BAR}.${action}`, `^b ${k}`);
-  // Keys show where their buttons are: the levels, e and f, HUNK, GIT, rg-fzf, STACK's row.
+  // Keys show where their buttons are: the levels, e and f, HUNK, GIT, search, STACK's row.
   host.shared.set("ram.zoom", "space");
   const t5 = R(side, { role: "side" });
   assert(textOf(withId(t5, "ram-git-line")).includes("^b g") && textOf(withId(t5, "ram-hunk-head")).includes("^b r")
-    && textOf(withId(t5, "ram-rg")).includes("/") && textOf(t5).includes("^b w"), "GIT ^b g, HUNK ^b r, rg-fzf /, STACK ^b w");
+    && textOf(withId(t5, "ram-rg")).includes("/") && textOf(t5).includes("^b w"), "GIT ^b g, HUNK ^b r, search /, STACK ^b w");
 }
 console.log("PASS: keys: C, < >, { }, e, I and P are bound after ^b, with the rest; the side column shows its keys by their parts");
 
@@ -3383,37 +4030,46 @@ host.shared.set("layout", "ram"); host.calls = [];
 const bar3 = new prefixMod.default(); bar3.init({}, cx2);
 bar3.finish("lazygit", cx2);
 assert.deepEqual(host.calls.at(-1), { name: "ram.git", args: {} }, "in RAM, RAM opens it (its own repo choice)");
-// ^b / the same way: rg-fzf in a new tab at the repo of the terminal you're in (else its
-// folder), with RAM's script; in RAM, RAM's ram.rg.
-assert.equal(prefixMod.RG_TAB, RG_TAB, "the key bar's rg-fzf script is RAM's");
+// ^b / the same way: RAM's search window over the window, for the terminal you're in
+// (its folder and its repo's top), in any layout; in RAM, RAM's ram.rg.
 host.shared.set("layout", "traveler");
-host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", cwd: "/repo/api" };
-host.calls = []; host.closed = [];
+host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", cwd: "/repo/api/src" };
+host.calls = []; host.closed = []; host.overlays = [];
 const bar6 = new prefixMod.default(); host.props = { overlay: "o11" }; bar6.init({}, cx2);
 bar6.finish("rg", cx2);
 await settle();
-assert.deepEqual(host.calls.at(-1), { name: "tab.new", args: { space: "s0", name: "rg-fzf api", folder: "/repo/api",
-  argv: ["exec", "sh", "-c", RG_TAB] } });
+const so = host.overlays.at(-1);
+assert.deepEqual(so, { mod: "ram", kind: "dialog", width: 0.9, height: 0.86, props: { role: "search", at: so?.props?.at, space: "s0",
+  name: "api", machine: null, target: { pane: "p0", terminal: "t1" }, folder: "/repo/api/src", repo: "/repo/api" } },
+  "RAM's search window (as RAM opens it), for the terminal you're in");
+assert.equal(host.shared.get("ram.search.top"), so.props.at, "the newest window's mark");
 assert.deepEqual(host.closed, ["o11"], "then the bar closes");
-host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", cwd: "/repo/api/src" };
-host.calls = [];
-await prefixMod.rgHere();
-assert.equal(host.calls.at(-1)?.args.folder, "/repo/api", "in a repo's subfolder: the repo's top");
+assert.equal(host.calls.filter(c => c.name === "tab.new").length, 0, "no tab");
 host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", cwd: "/home/tester/notes" };
-host.calls = [];
-await prefixMod.rgHere();
-assert.deepEqual([host.calls.at(-1)?.args.folder, host.calls.at(-1)?.args.name], ["/home/tester/notes", "rg-fzf notes"], "not a repo: that folder");
+host.overlays = [];
+await prefixMod.searchHere();
+assert.deepEqual([host.overlays.at(-1)?.props?.folder, host.overlays.at(-1)?.props?.repo], ["/home/tester/notes", null], "not a repo: that folder");
+host.focused = { space: "s0", tab: "tab0-0", pane: "pX", terminal: null, cwd: "/home/tester/elsewhere" };
+host.overlays = [];
+await prefixMod.searchHere();
+assert.deepEqual([host.overlays.at(-1)?.props?.folder, host.overlays.at(-1)?.props?.target], ["/repo/api", null],
+  "no terminal has the keyboard: the space's folder, and picks are copied");
+spaces[0].folder = ""; host.overlays = []; host.notes = [];
+await prefixMod.searchHere();
+assert.deepEqual([host.overlays.length, host.notes.at(-1)?.title], [0, "Nowhere to search"], "no folder at all: nowhere");
+spaces[0].folder = "/repo/api";
 // The key's other way in (finish without a task context: runCommand) does the same.
-host.calls = [];
+host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", cwd: "/repo/api" };
+host.overlays = []; host.calls = [];
 const bar8 = new prefixMod.default(); bar8.init({}, cx2);
 bar8.finish("rg"); await settle();
-assert.equal(host.calls.at(-1)?.name, "tab.new", "outside RAM: its own tab, not ram.rg");
+assert.equal(host.overlays.at(-1)?.props?.role, "search", "outside RAM: the window, not ram.rg");
 host.shared.set("layout", "ram"); host.calls = [];
 const bar7 = new prefixMod.default(); bar7.init({}, cx2);
 bar7.finish("rg", cx2);
 assert.deepEqual(host.calls.at(-1), { name: "ram.rg", args: {} }, "in RAM, RAM opens it");
 barText = textOf(bar.render(cx2));
-assert(barText.includes("search") && barText.includes("/") && barText.includes("rg-fzf"), "search: / rg-fzf");
+assert(barText.includes("search") && barText.includes("/") && !barText.includes("rg-fzf"), "search: / search");
 // The bar's own commands: ^b < > move the tab, ^b { } the space, ^b C the new-tab menu;
 // in RAM ^b ( ) show a space at its BP, as clicking it does.
 {
@@ -3452,7 +4108,7 @@ assert(barText.includes("search") && barText.includes("/") && barText.includes("
   }
 }
 host.focused = null;
-console.log("PASS: the ^b bar (every layout) lists g lazygit and / rg-fzf (they work everywhere), C, < > and { }, and RAM's keys under RAM only while RAM shows");
+console.log("PASS: the ^b bar (every layout) lists g lazygit and / search (they work everywhere), C, < > and { }, and RAM's keys under RAM only while RAM shows");
 // ^b w: navigate mode, as in the Herdr TUI, each move shown at once: j/k through the
 // spaces (the layout's own list marks the one it's on), h/l through that space's
 // tabs, H J K L the panes; Enter stays, Esc goes back. No picker.
