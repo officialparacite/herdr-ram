@@ -308,9 +308,34 @@ Neovim theme.
   when they press Commit or Create, `git add -A` and `git commit`, or
   `git init`; it also runs `hunk session list`, `hc` (`read` too, for the peek
   strip and the running commands) and `herdr-app do tab.new`, and reads
-  lazygit's `state.yml`. Nothing reaches the network. lazygit and hunk need to
-  be installed for `^b g` and the reviews, and rg-fzf (with rg, fzf, bat, jq)
-  for `^b /`.
+  lazygit's `state.yml`. Nothing reaches the network (installing the tools
+  below does).
+- The tools: adding RAM installs everything it uses, so every key works from
+  the start. Check what's there first (`command -v`, `fzf --version`), tell
+  the person what's missing and how you'll install it, ask once, then install
+  it the device's own way. RAM needs git, lazygit (`^b g`), hunk (`^b r`),
+  rg-fzf (`^b /`) and rg-fzf's ripgrep, fzf 0.45 or newer, bat and jq.
+  Homebrew, where there is one, has all of them but rg-fzf:
+  `brew install git lazygit hunk ripgrep fzf bat jq`. Without it, hunk comes
+  from its installer (`curl -fsSL https://hunk.dev/install.sh | sh`); Debian
+  and Ubuntu call bat `batcat` (link it as `bat`), and when their fzf is older
+  than 0.45, use fzf's own install (https://github.com/junegunn/fzf). rg-fzf
+  isn't packaged: clone https://github.com/officialparacite/rg-fzf to a
+  lasting folder (`~/.local/share/rg-fzf`) and link its `rg-fzf.sh` as
+  `rg-fzf` in a folder on the login shell's PATH, since RAM starts it from a
+  login shell.
+- The editor: LANG and rg-fzf open files in `$EDITOR`, so ask the person which
+  editor they want: Neovim, set up with LazyVim and RAM's theme (`nvim/`), or
+  Fresh (https://github.com/sinelaw/fresh), which works like a desktop editor
+  and has no learning curve. Install it if it's missing (Homebrew's `neovim`
+  or `fresh-editor`; else the system's Neovim package, or Fresh's installer:
+  `curl -fsSL https://raw.githubusercontent.com/sinelaw/fresh/refs/heads/master/scripts/install.sh | sh`).
+  Make it `EDITOR` in the login shell's startup file, asking first when
+  `EDITOR` already names another editor. For Neovim with no `~/.config/nvim`
+  yet, start it from LazyVim's starter
+  (`git clone https://github.com/LazyVim/starter ~/.config/nvim`, then delete
+  its `.git`) before the theme files go in; a config that isn't LazyVim (no
+  `lua/config/lazy.lua`) keeps its own look, without RAM's theme files.
 - The layout uses its own theme: copy `themes/ram.json` too.
 - And its own terminal menu: copy `mods/ram-menu` (the layout's
   `terminal_menu`). Without it Herdr falls back to its own menu, with no Copy
@@ -331,9 +356,10 @@ Neovim theme.
   `mods/ram/ui.js` and every key name in `keys.json`, or the bar loses its
   keys.
 - RAM draws in its own colors (`mods/ram/ui.js`), not the person's theme.
-- `nvim/` is optional and only for LazyVim: ask first and never overwrite the
-  person's files. An existing `herdr_theme.lua` gets `ram = "herdr-ram",` in its
-  `BY_LAYOUT`; on Omarchy leave out `colorscheme.lua` and `aether.lua`.
+- `nvim/` goes in only when the person picks Neovim, and only for LazyVim:
+  never overwrite the person's files. An existing `herdr_theme.lua` gets
+  `ram = "herdr-ram",` in its `BY_LAYOUT`; on Omarchy leave out
+  `colorscheme.lua` and `aether.lua`.
 - Never test by driving a window someone is using: `^b` keys act on the
   focused pane, tab and space, and RAM's own resizes move their columns.
   `tests/verify.mjs` checks the mods with a stand-in for Herdr instead.
@@ -380,6 +406,9 @@ Neovim theme.
 
 - Every mod passes `herdr-app check`, `node tests/verify.mjs` passes, and
   `herdr-app status` shows no errors with `ram` shown.
+- `command -v git lazygit hunk rg-fzf rg fzf bat jq` finds each one,
+  `fzf --version` is 0.45 or newer, and `$EDITOR` in a new login shell is the
+  editor the person picked (`nvim` or `fresh`).
 - `^b m` shows every space as a stick under the terminal with the main stick
   beside it, `SP▸` on the tab meta shows and a `BP▸` on each stick; `^b i`
   gives the terminal the room at the bright BP, with STACK, HEAP, `.rodata`,

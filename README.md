@@ -48,16 +48,23 @@ in every layout, and an optional Neovim theme follows the layout.
 | `preview.png` | a picture of the meta level (the gallery shows it) |
 | `RECIPE.md` | the brief to build RAM from scratch; your agent reads it when it adds RAM |
 
-## Needs
+## What it installs
 
-- The [Herdr app](https://herdr.dev) 0.1.15 or later, with its herdr-core.
-  Tested on 0.1.15 on macOS.
-- git. [lazygit](https://github.com/jesseduffield/lazygit) for `^b g` and the GIT
-  lines, [hunk](https://hunk.dev) for the reviews (`^b r`, HUNK):
-  `brew install lazygit hunk`.
+Adding RAM installs everything it uses that isn't there yet, the way your
+system installs things (Homebrew, apt, pacman and so on). The agent says what
+it will install and asks once first.
+
+- git, [lazygit](https://github.com/jesseduffield/lazygit) for `^b g` and the
+  GIT lines, and [hunk](https://hunk.dev) for the reviews (`^b r`, HUNK).
 - [rg-fzf](https://github.com/officialparacite/rg-fzf) for `^b /` and the space
-  level's `rg-fzf` button (it needs rg, fzf, bat and jq).
-- Optional: Neovim with LazyVim for the theme.
+  level's `rg-fzf` button, with what it needs: ripgrep, fzf, bat and jq.
+- An editor for the files LANG and rg-fzf open, set as your `$EDITOR`. You
+  pick it: Neovim, set up with LazyVim and RAM's theme, or
+  [Fresh](https://github.com/sinelaw/fresh), which works like a desktop editor
+  and has no learning curve.
+
+It needs the [Herdr app](https://herdr.dev) 0.1.15 or later, with its
+herdr-core, and an agent in a Herdr terminal. Tested on 0.1.15 on macOS.
 
 ## Install
 
@@ -65,11 +72,11 @@ In a Herdr terminal, ask your agent:
 
 > Read ~/.config/herdr-app/AGENTS.md, then add this layout: https://github.com/officialparacite/herdr-ram
 
-It reads every file first, tells you what RAM runs (git, hunk, `hc`), adds the
-layout and its mods next to yours, and merges RAM's keys into your
-`keys.json`, asking before it replaces a key you already use. Your own layout
-and keys stay as they are; `ctrl-shift-l`, or `ctrl-b` then `space`, switches
-between layouts.
+It reads every file first, tells you what RAM runs (git, hunk, `hc`), installs
+the tools above that you don't have yet, adds the layout and its mods next to
+yours, and merges RAM's keys into your `keys.json`, asking before it replaces
+a key you already use. Your own layout and keys stay as they are;
+`ctrl-shift-l`, or `ctrl-b` then `space`, switches between layouts.
 
 What the keys take over, so you can say no to any of them:
 
@@ -84,10 +91,11 @@ What the keys take over, so you can say no to any of them:
 
 ### By hand
 
-From a clone of this repo. The mods go in before the keys: Herdr drops a key
-whose mod isn't there yet when it loads `keys.json`. Each mod folder is copied
-next to `mods/` and then moved in whole, because Herdr docks a mod folder it
-sees without its `mod.json` into the layout on screen.
+From a clone of this repo, with the tools above installed. The mods go in
+before the keys: Herdr drops a key whose mod isn't there yet when it loads
+`keys.json`. Each mod folder is copied next to `mods/` and then moved in
+whole, because Herdr docks a mod folder it sees without its `mod.json` into
+the layout on screen.
 
 ```sh
 H=~/.config/herdr-app
@@ -260,8 +268,9 @@ From meta they show in meta's terminal unless `e` is on.
 | `lua/plugins/colorscheme.lua` | makes `herdr` the usual colorscheme (plain LazyVim only) |
 | `lua/plugins/aether.lua` | aether.nvim (v3), which draws both schemes (plain LazyVim only) |
 
-Copy them to the same paths under `~/.config/nvim`, keeping any file of yours
-with the same name. On Omarchy, skip `colorscheme.lua` and `aether.lua`. If you
+When you pick Neovim, the agent copies them to the same paths under
+`~/.config/nvim` (by hand, copy them yourself), keeping any file of yours with
+the same name. On Omarchy, skip `colorscheme.lua` and `aether.lua`. If you
 already have `herdr_theme.lua` from another Herdr layout, add
 `ram = "herdr-ram",` to its `BY_LAYOUT` instead.
 
