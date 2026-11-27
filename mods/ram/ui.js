@@ -1,7 +1,7 @@
 // RAM's look and small shared helpers, used by main.js, all.js and hunk.js.
 import { div } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { keys, theme, shared } from "herdr";
+import { keys, theme, shared, window } from "herdr";
 
 export const AMBER = "#ffb547", CYAN = "#6fe3d3", GOLD = "#c9a24a", GREEN = "#7dff9b", RED = "#ff5f6d";
 // Other machines (.rodata, read-only memory): their own color, so they never pass for spaces.
@@ -64,6 +64,19 @@ export function shortcut(command) {
   const plain = second.filter(k => !k.startsWith("shift-")).sort((a, b) => a.length - b.length)[0];
   // One spelling per key, as the bar writes it: "shift-p" is P.
   return `${prefix.keys} ${(plain ?? second[0]).replace(/^shift-([a-z])$/, (_, c) => c.toUpperCase())}`;
+}
+
+// The key a terminal command has (keys.json's terminal or global section), as
+// RAM's right-click menu writes it: ⌘ cmd, ^ ctrl, ⌥ alt, ⇧ shift, and a letter
+// after ⌘ ⌥ or ⇧ in capitals (ctrl-shift-f is ^⇧F). Of several, the one the menu
+// shows: on a Mac the cmd- one, else the shortest ending in a letter. "" for none.
+export function terminalKey(command) {
+  const all = keys().filter(k => (k.section === "terminal" || k.section === "global") && k.action === command).map(k => k.keys)
+    .sort((a, b) => a.length - b.length);
+  const mac = window()?.platform === "macos";
+  const k = all.find(x => mac && x.startsWith("cmd-")) ?? all.find(x => /-[a-z]$/.test(x)) ?? all[0];
+  return k ? k.replace(/\bcmd-/g, "\u2318").replace(/\bctrl-/g, "^").replace(/\balt-/g, "\u2325").replace(/\bshift-/g, "\u21e7")
+    .replace(/([\u2318\u21e7\u2325])([a-z])$/, (_, m, c) => m + c.toUpperCase()) : "";
 }
 
 // A status light; it pulses while working or blocked (MOTION: the window is active).

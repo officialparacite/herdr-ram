@@ -222,7 +222,7 @@ const LABELS = {
   "pane.split:down": "split down", "pane.close": "close pane", "pane.zoom": "zoom",
   "agent.next": "next", "agent.prev": "prev", "lazygit": "lazygit", "rg": "search",
   "ram.meta": "meta", "ram.space": "space", "ram.hunk": "hunk", "ram.follow": "follow", "ram.enter": "enter",
-  "ram.bp": "BP here", "ram.peek": "peek", "ram.changes": "diff",
+  "ram.bp": "BP here", "ram.peek": "peek", "ram.changes": "diff", "ram.credits": "credits",
   "app.palette": "palette", "app.help": "all keys", "app.settings": "settings",
   "layout.toggle:sidebar": "sidebar", "layout.switch": "layout", "app.zoom_in": "bigger",
   "app.zoom_out": "smaller", "app.zoom_reset": "normal size", "passthrough": "send ^b",
