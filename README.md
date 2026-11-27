@@ -39,7 +39,7 @@ an optional Neovim theme follows the layout.
 |---|---|
 | `layouts/ram.json`, `layouts/ram.svg` | the layout, and the picture Settings shows for it |
 | `themes/ram.json` | phosphor green on near-black, amber for the current thing |
-| `mods/ram/` | the layout's mod: the strip, the side column, the sticks, the peek strip, HUNK, LANG, GIT's dialog and the search window (and `ram-search`) |
+| `mods/ram/` | the layout's mod: the strip, the side column, the sticks, the peek strip, HUNK, LANG, GIT's dialog, the search window (and `ram-search`) and the credits |
 | `mods/ram-menu/` | the terminals' right-click menu: Copy and Paste, then Herdr's own items |
 | `mods/ram-prefix/` | the `ctrl-b` key bar, in every layout (with `^b w` navigate mode, `^b g` lazygit and `^b /` search) |
 | `mods/ram-text-bigger/`, `mods/ram-text-smaller/` | ⌘+ and ⌘−: the terminals' text a size bigger or smaller |
@@ -152,6 +152,12 @@ space level and still have the main stick in meta. In meta, clicks only select
 (the terminal shows it, you stay in meta), and `^b d` switches the main stick
 between memory and diff (and shows it if you hid it).
 
+Click the space's name at the top left (or press `^b R`) for the credits: who
+made RAM, its license, its address and what it builds on. The side column ends
+with Settings, Keys, Commands and Find, each with its key; Find opens Herdr's
+find bar in the terminal you're in (with Herdr's own keys, ⌘F on a Mac and
+`ctrl-shift-f` elsewhere).
+
 ## SP, BP and RET
 
 - **SP▸** (amber) is the tab meta shows, one across all the sticks. Clicking
@@ -199,7 +205,7 @@ them; Esc, any other key or a click closes it.
 | Agents | `a` / `A` next / previous |
 | Git | `g` lazygit at the repo you're in (a folder that isn't one: a dialog to make it one) |
 | Search | `/` the search window, at the repo you're in (else its folder) |
-| RAM | `m` meta · `i` space · `I` BP here · `f` follow · `e` enter · `P` sticks (meta) or peek strip (space) · `r` hunk (the space's review, else its menu) · `d` diff (meta's main stick) |
+| RAM | `m` meta · `i` space · `I` BP here · `f` follow · `e` enter · `P` sticks (meta) or peek strip (space) · `r` hunk (the space's review, else its menu) · `d` diff (meta's main stick) · `R` credits |
 | App | `:` palette · `?` all keys · `s` settings · `b` side column (each level keeps its own) · `space` next layout · `+` / `_` / `0` zoom in / out / reset · `ctrl-b` sends `ctrl-b` to the program |
 
 `^b w` is navigate mode, and each move shows at once: `j` and `k` (or up and

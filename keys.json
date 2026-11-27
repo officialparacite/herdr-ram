@@ -44,6 +44,7 @@
     "shift-i": "ram-prefix.ram.bp",
     "shift-p": "ram-prefix.ram.peek",
     "d": "ram-prefix.ram.changes",
+    "shift-r": "ram-prefix.ram.credits",
     "h": "ram-prefix.pane.go:left",
     "shift-h": "ram-prefix.pane.swap:left",
     "j": "ram-prefix.pane.go:down",

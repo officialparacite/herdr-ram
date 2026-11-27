@@ -113,6 +113,7 @@ const stub = url(`
   export const closeOverlay = id => { host.closed.push(id); return null; }, openOverlay = () => "o1";
   export const notify = n => { host.notes.push(n); return "n1"; }, home = () => process.env.HOME;
   export const panes = () => host.panes, focused = () => host.focused, spaces = () => host.spaces, keys = () => [];
+  export const window = () => ({ active: true, platform: "macos", buttons: false });
 `);
 const swap = s => s.replaceAll('"gpui-kit"', JSON.stringify(stub)).replaceAll('"gpui-base"', JSON.stringify(stub)).replaceAll('"herdr"', JSON.stringify(stub));
 const ui = url(swap(readFileSync(`${HOME}/mods/ram/ui.js`, "utf8")));

@@ -22,15 +22,16 @@ replace, a ctrl-b key bar and a Neovim theme.
   bar; the macOS window buttons sit at 18, 18.
 - **The strip, 74px, on top in both levels** (it drags the window): a line of
   small addresses (`0x0000`, `0x0400`, ...), then `0x05 name` for the space
-  you're in (cyan address), its tabs as fixed 118x23 chips (`*1` the shown
-  tab, `&2` the rest, `!n` when an agent there needs you; long names
-  truncate), one square `+`, and on the right `^b`, two fixed 100x26 level
-  buttons, `m meta SP▸` and `i space BP▸` (the key in amber, the name, the
-  level's pointer: `SP▸` amber, `BP▸` white; the current level lit, meta's red
-  and pulsing while SP is on an agent that needs you), and two 26x26 squares
-  for the level you're in, `b` (its side column) and `P` (what's under its
-  terminal: the sticks in meta, the peek strip in the space level), lit while
-  they show. The left 100 points stay clear of the macOS window buttons.
+  you're in (cyan address; a click opens the credits), its tabs as fixed
+  118x23 chips (`*1` the shown tab, `&2` the rest, `!n` when an agent there
+  needs you; long names truncate), one square `+`, and on the right `^b`, two
+  fixed 100x26 level buttons, `m meta SP▸` and `i space BP▸` (the key in
+  amber, the name, the level's pointer: `SP▸` amber, `BP▸` white; the current
+  level lit, meta's red and pulsing while SP is on an agent that needs you),
+  and two 26x26 squares for the level you're in, `b` (its side column) and `P`
+  (what's under its terminal: the sticks in meta, the peek strip in the space
+  level), lit while they show. The left 100 points stay clear of the macOS
+  window buttons.
 - **The side column** (block `sidebar`) is 390px in meta and 340px in the
   space level. Its edge drags (down to 240px), and each level keeps the width
   you leave it at and whether it shows (`b`, `^b b`).
@@ -60,8 +61,9 @@ replace, a ctrl-b key bar and a Neovim theme.
   the spaces with changes and their files, the picked file's diff, and a
   commit box for that file's repo. A small `w` box next to `d diff` wraps long
   diff lines to the stick (off: they scroll sideways). Under it `.rodata`
-  (other machines, `Add a machine`, `+`) and Settings / Keys / Commands with
-  their `^b` keys.
+  (other machines, `Add a machine`, `+`) and Settings / Keys / Commands / Find
+  with their keys (`^b s`, `^b ?`, `^b :` and Find's, `⌘F` with Herdr's own
+  keys on a Mac), or only their icons in a column too narrow for every key.
 - **space:** the terminal fills the rest. The side column has STACK (every
   space from `0x01` down, a white `◂BP` on the one you work in, `@machine`,
   FAULT, `◆n`, `+n`, and on its label row `^b w`, a `/ search` button drawn as
@@ -128,6 +130,15 @@ replace, a ctrl-b key bar and a Neovim theme.
   (`Replace 4 matches in 2 files?`, `Enter yes`, `Esc no`). Keys are written
   in words, as rg-fzf's help writes them. Only the rows and lines that fit are
   drawn.
+- **The credits** (a click on the strip's space name, or `^b R`): a dialog as
+  wide as its longest line (625px) and as tall as what's in it. `RAM` (cyan)
+  and `a Herdr layout`; "Work on many projects at once and see all of them on
+  one screen."; `Made by` and the author's name, Srivatsa Kannan (amber);
+  "Copyright 2026 Srivatsa Kannan · Apache License 2.0"; the repo's address,
+  underlined, and `↗` (a click opens it in the browser); `Thanks to` and a row
+  for each project RAM builds on (its name, `by` its author, what it gave and
+  its license, as NOTICE has them); and an `Esc close` button. Enter or Esc
+  closes it too.
 - **The terminal menu** (right-click on a terminal, mod `ram-menu`): Copy and
   Paste, then Herdr's own items (split right and down, zoom, where
   right-clicks go, back to the parent, close pane), each with its key.
@@ -180,7 +191,8 @@ replace, a ctrl-b key bar and a Neovim theme.
   meta's side column if you hid it), `^b g` lazygit, `^b /` search, `^b P`
   what's under the terminal off or on (the sticks in meta, the peek strip in
   the space level), `^b b` the side column (each level keeps its own), `^b C`
-  the new-tab menu, `^b <` `>` move the tab, `^b {` `}` move the space.
+  the new-tab menu, `^b <` `>` move the tab, `^b {` `}` move the space, `^b R`
+  the credits.
 - `^b w` navigate mode, each move shown at once: the bar shows one row
   (`navigate`, the space's name, `@machine`, `i of n`, `tab n` and its name,
   `i of n`); `j`/down and `k`/up the next and previous space, `h`/left and
@@ -281,6 +293,12 @@ replace, a ctrl-b key bar and a Neovim theme.
   back, Esc closes.
 - The terminal menu's Copy and Paste focus the right-clicked pane
   (`pane.focus`), run `terminal.copy` / `terminal.paste`, then close the menu.
+- Find, the side column's last button, runs `terminal.search`: Herdr's find
+  bar in the terminal you're in, wherever the keyboard is. When the shown
+  tab's focused pane is a panel, `pane.focus` on that tab's first terminal
+  goes first. It shows the key keys.json gives `terminal.search` as the
+  terminal menu writes keys (`⌘F` for Herdr's own on a Mac, `^⇧F` for
+  `ctrl-shift-f`; on a Mac a `cmd-` key first).
 - The diff view's commit box runs `git add -A` and `git commit -m` in the
   picked file's repo, and only when you press Commit.
 - ⌘+ / ⌘− change the terminals' text size in settings.json (`font_size`, 1 a
@@ -303,28 +321,29 @@ replace, a ctrl-b key bar and a Neovim theme.
   `sidebar`'s `hidden` in `layout()`, since `^b b` is Herdr's
   `layout.toggle`), keeps the running commands (`ram.procs`) and follow's
   return address (`ram.ret`), and is the only copy with the command loop
-  (`ram.meta|space|hunk|git|rg|follow|enter|bp|peek|changes|zoom|back` from
-  `nextCommand()`); `side`; `rams`; `peek`; and the dialogs `hunk-menu`,
-  `lang`, `git-init` and `search` (also `ram-search`'s tab). Its mod.json is
-  `{"place": "none", "focusable": true}`, so `pane.go` can give a copy the
-  keyboard (it gets `"focus"` from `nextCommand()`; the side column keeps it,
-  the others hand it back). `main.js` draws the levels; `pointers.js` keeps
-  SP, BP and the other places (shared state, since Herdr shows one tab per
-  space); `procs.js` the running commands (`terminals()`: a shell whose
-  foreground program isn't the shell; their last lines from `hc read`);
-  `gitinit.js` GIT's dialog; `search.js` the search window (its run script,
-  the preview, the keys, the replace and its two scripts; Tab, Shift-Tab and
-  Esc bound with `cx.bind_keys` in its own key context); `ram-search` the
-  shell entry for a file list; `all.js` the main stick; `hunk.js` the reviews
-  (it runs `hunk session list --json` every 3 s while a review is open, else
-  every 15 s); `git.js` branch and counts per space (`git status`,
-  `git rev-parse`, `git diff --numstat`, again on `watchFolder` changes and
-  every minute); `model.js` the agents and exit history; `ui.js` the colors
-  and small parts; `langs.js` LANG: the language table (name, GitHub's color,
-  kind, extensions, file names), `git ls-tree -r -l -z --full-tree HEAD` at
-  the repo's top on its machine (again when the branch changes and every
-  minute), the summary and the dialog (role `lang`, modes `list`, `files`,
-  `ext`); `arrow.svg` the frames' arrow head.
+  (`ram.meta|space|hunk|git|rg|follow|enter|bp|peek|changes|credits|zoom|back`
+  from `nextCommand()`); `side`; `rams`; `peek`; and the dialogs `hunk-menu`,
+  `lang`, `git-init`, `search` (also `ram-search`'s tab) and `credits`. Its
+  mod.json is `{"place": "none", "focusable": true}`, so `pane.go` can give a
+  copy the keyboard (it gets `"focus"` from `nextCommand()`; the side column
+  keeps it, the others hand it back). `main.js` draws the levels;
+  `pointers.js` keeps SP, BP and the other places (shared state, since Herdr
+  shows one tab per space); `procs.js` the running commands (`terminals()`: a
+  shell whose foreground program isn't the shell; their last lines from
+  `hc read`); `gitinit.js` GIT's dialog; `credits.js` the credits; `search.js`
+  the search window (its run script, the preview, the keys, the replace and
+  its two scripts; Tab, Shift-Tab and Esc bound with `cx.bind_keys` in its own
+  key context); `ram-search` the shell entry for a file list; `all.js` the
+  main stick; `hunk.js` the reviews (it runs `hunk session list --json` every
+  3 s while a review is open, else every 15 s); `git.js` branch and counts per
+  space (`git status`, `git rev-parse`, `git diff --numstat`, again on
+  `watchFolder` changes and every minute); `model.js` the agents and exit
+  history; `ui.js` the colors and small parts; `langs.js` LANG: the language
+  table (name, GitHub's color, kind, extensions, file names),
+  `git ls-tree -r -l -z --full-tree HEAD` at the repo's top on its machine
+  (again when the branch changes and every minute), the summary and the dialog
+  (role `lang`, modes `list`, `files`, `ext`); `arrow.svg` the frames' arrow
+  head and `find.svg` Find's icon.
 - Shared state: `ram.zoom` (meta or not), `ram.sp` (SP: space, tab, pane),
   `ram.bp` (each space's BP tab), `ram.frame` (the space you work in),
   `ram.came` (where you were when a tool's tab showed), `ram.goto` (what the
@@ -344,8 +363,8 @@ replace, a ctrl-b key bar and a Neovim theme.
   `agent.focus`, `terminal.peek`, `terminal.copy`, `terminal.paste`,
   `pane.close`, `layout.resize`, `layout.show`, `layout.hide`,
   `layout.toggle`, `mod.open` (machine-add), `app.settings`, `app.help` and
-  `app.palette` (Settings, Keys and Commands); `setAgentOrder()` on every
-  render. lazygit and hunk tabs are made with
+  `app.palette` (Settings, Keys and Commands), `terminal.search` (Find);
+  `setAgentOrder()` on every render. lazygit and hunk tabs are made with
   `herdr-app do tab.new --space --name --folder --argv '["exec", ...]'` (so
   quitting the program closes its tab), then labelled with `hc label`. It also
   runs `hc machine ls --json` every 15 s, `hc ls --all --json`, `hc read` (the
@@ -355,7 +374,8 @@ replace, a ctrl-b key bar and a Neovim theme.
   runs `sh -c` (ripgrep, fzf, awk), `bat`, `rg --json` and `cat`, `kill` and
   `rm` on its own folders in `$TMPDIR`; a replace `readTextFile` and
   `writeTextFile`, and for a big file its own `sh -c` (awk, `cksum`, `cp -p`,
-  `mv`). No mod opens a network connection.
+  `mv`). No mod opens a network connection: a click on the credits' address
+  hands it to the browser (`cx.open_url`).
 - `mods/ram-menu`: the terminals' right-click menu, named by the layout
   root's `terminal_menu`. Herdr opens it as a popup with `{tab: "pane",
   target: {pane, terminal}}` (its mod.json makes it 250x300). Copy and Paste
@@ -551,6 +571,9 @@ replace, a ctrl-b key bar and a Neovim theme.
 - `^b h` gives the side column the keyboard: Enter on a row does what its
   click does, and Esc goes back to the terminal.
 - Right-clicking a terminal offers Copy and Paste.
+- A click on the strip's space name, or `^b R`, opens the credits, and Esc
+  closes them; the side column's Find opens Herdr's find bar in the terminal
+  you're in.
 - ⌘+ makes the terminals' text bigger and leaves RAM's panels as they were.
 - With the nvim files installed, nvim in a RAM pane loads `herdr-ram` with no
   `Normal` background, and the usual colorscheme in any other layout.

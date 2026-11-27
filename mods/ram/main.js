@@ -23,8 +23,9 @@
 // from meta they stay in meta unless the e square (ctrl-b e) is on. Search
 // (ctrl-b /, the space level's / search) is a window over the window
 // (search.js), for the terminal you're in.
-// Roles "hunk-menu", "lang", "git-init" and "search" are dialogs ("search" is
-// also ram-search's tab).
+// Roles "hunk-menu", "lang", "git-init", "search" and "credits" are dialogs
+// ("search" is also ram-search's tab). A click on the strip's space name (top
+// left) or ctrl-b R opens the credits (credits.js).
 // The model, exit history and git info are night-city's (model.js, git.js).
 import { View, div, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
@@ -37,12 +38,13 @@ import { LangData, LangView, INCLUDE, summarize, langBar, shareText, filesText, 
 import { HUNK_LABEL, COMMANDS, labelOf, Sessions, entries, nameOf, HunkMenu, marker,
   HUNK_PAD, HUNK_TOP, HUNK_GAP, hunkHeight, reviewsIn, forRepo, hunkLine } from "./hunk.js";
 import { AMBER, CYAN, GOLD, GREEN, RED, ROM, ROM_LINE, ROM_BG, ROM_HOVER, U, CELL, LED, STATUS, RANK, ADDR, REF,
-  stop, textW, terse, tipOf, shortcut, led, fault, finished, finishedW, DONE_BG, BP_ON, RET_DIM, marks, headGroup,
+  stop, textW, terse, tipOf, shortcut, terminalKey, led, fault, finished, finishedW, DONE_BG, BP_ON, RET_DIM, marks, headGroup,
   navigating, sameDir, ago } from "./ui.js";
 import { SP, BP, FRAME, CAME, GOTO, RET, live, spPlace, bpTab, frameSpace, bpPlace, show, goTo } from "./pointers.js";
 import { PROCS, Tail, track, sameProcs, procRows } from "./procs.js";
 import { GitInit, TOOL_OPEN } from "./gitinit.js";
 import { SearchView, openSearch } from "./search.js";
+import { Credits, openCredits } from "./credits.js";
 
 // The space sticks (regions) in meta, under the terminal.
 const HEADER_H = 19 * U, LABELS_H = 13 * U, FRAME_H = 18 * U, BOTTOM_H = 21 * U, PINS_H = 6 * U, HEAP_H = 20 * U;
@@ -275,6 +277,7 @@ export default class Ram extends View {
     if (role === "lang") { this.langView = new LangView(cx); return; }
     if (role === "git-init") { this.gitView = new GitInit(cx); return; }
     if (role === "search") { this.searchView = new SearchView(cx); return; }
+    if (role === "credits") { this.creditsView = new Credits(cx); return; }
     // With "focusable" (mod.json), ctrl-b h j k l can give a copy the keyboard.
     // The side column takes it (its rows, keyboard()); the strip, the sticks and
     // the peek strip hand it straight back the way it came.
@@ -377,8 +380,8 @@ export default class Ram extends View {
     // one, else the menu; on a review: back), ram.git (lazygit), ram.rg
     // (search, search.js), ram.follow, ram.enter (the e square), ram.bp (BP moves to SP),
     // ram.peek (P: meta's sticks, or the space level's peek strip, on or off),
-    // ram.changes (the main stick's view), ram.zoom, ram.back. "focus": the
-    // keyboard, handed straight back.
+    // ram.changes (the main stick's view), ram.credits (credits.js), ram.zoom,
+    // ram.back. "focus": the keyboard, handed straight back.
     cx.spawn(async cx => {
       for (;;) {
         const c = await nextCommand();
@@ -404,6 +407,7 @@ export default class Ram extends View {
           else setShared("ram.all.mode", shared("ram.all.mode") === "changes" ? "memory" : "changes");
         }
         else if (c === "back") this.back(cx);
+        else if (c === "credits") openCredits();
         cx.notify();
       }
     });
@@ -1155,8 +1159,8 @@ export default class Ram extends View {
     cx.notify();
   }
 
-  // The bottom row: Settings / Keys / Commands, or while the column has the
-  // keyboard the keys for the outlined part.
+  // The bottom row: Settings / Keys / Commands / Find, or while the column has
+  // the keyboard the keys for the outlined part.
   kbBottom(compact) {
     if (!this.kbOn()) return this.keysRow(compact);
     const t = theme(), it = (this.kbList ?? [])[Math.max(0, Math.min(this.kb.at, (this.kbList ?? []).length - 1))];
@@ -1660,9 +1664,9 @@ export default class Ram extends View {
       "tab", f.id, s.tabs.map(x => x.id), "x");
   }
 
-  // The strip, on top in every level: the current space's name, then its tabs
-  // as one strip of chips (each closes with its own x) and + to push a new tab;
-  // the level buttons right.
+  // The strip, on top in every level: the current space's name (a click opens
+  // the credits, credits.js), then its tabs as one strip of chips (each closes
+  // with its own x) and + to push a new tab; the level buttons right.
   strip(data) {
     const t = theme(), width = this.size.width;
     const pl = inset(), s = data.spaces.find(x => x.active);
@@ -1671,10 +1675,14 @@ export default class Ram extends View {
         div().w(120 * U).flex_none().text_size(9 * U).text_color("#3f5a49").child("0x" + (k * 0x400).toString(16).toUpperCase().padStart(4, "0"))));
     const row = h_flex().flex_1().min_h(0).pl(pl).pr(12 * U).gap(10 * U).items_center();
     if (s) {
-      const i = data.spaces.indexOf(s) + 1;
+      const i = data.spaces.indexOf(s) + 1, credits = terse(shortcut("ram.credits"));
       const tower = towers(data, []).find(x => x.id === s.id);
       row.child(h_flex().id("ram-strip-space").flex_none().max_w(150 * U).gap(6 * U).items_center()
-          .tooltip(`${ADDR(i)} ${s.name}${s.machine ? " @" + s.machine : ""}`)
+          .cursor_pointer().hover(st => st.opacity(0.8))
+          .tooltip(`${ADDR(i)} ${s.name}${s.machine ? " @" + s.machine : ""} \u00b7 click: credits${credits ? " (" + credits + ")" : ""}`)
+          // The press stays here: on the strip it would start a window drag.
+          .on_mouse_down("left", stop)
+          .on_click((_e, cx) => { cx.stop_propagation(); openCredits(); })
           .child(div().flex_none().text_size(10.5 * U).text_color(CYAN).child(ADDR(i)))
           .child(div().min_w(0).truncate().text_size(12.5 * U).font_semibold().text_color(AMBER).child(s.name))
           .children([this.marker(s.id)].filter(Boolean)))
@@ -1692,9 +1700,9 @@ export default class Ram extends View {
 
   // STACK (every space, 0x01 at the top, growing down; SP points at the one
   // you're in), free, HEAP (that space's agents, growing up to its label),
-  // .rodata, GIT, then Settings / Keys / Commands. Narrower and shorter rows when
-  // it isn't this column's level. Both labels count their rows, so a short
-  // column (meta) can show fewer rows and still say how many there are.
+  // .rodata, GIT, then Settings / Keys / Commands / Find. Narrower and shorter
+  // rows when it isn't this column's level. Both labels count their rows, so a
+  // short column (meta) can show fewer rows and still say how many there are.
   side(cx) {
     if (level() === "meta") return this.metaSide(cx);
     const t = theme(), compact = false;
@@ -2003,18 +2011,40 @@ export default class Ram extends View {
     return box;
   }
 
+  // The bottom row: Settings, Keys (every key), Commands (the palette) and Find
+  // (findInTerminal), each with its key; when the column is too narrow for the
+  // widest of them in each one's equal share, only their icons (the tooltips
+  // still say the keys).
   keysRow(compact) {
     const t = theme();
-    const item = (id, icon, label, command) => h_flex().id(`ram-${id}`).flex_1().h(KEY_H).gap(5 * U).items_center().justify_center().rounded(2)
-      .cursor_pointer().hover(st => st.bg(t.hover)).tooltip(`${label}${shortcut(command) ? "  " + terse(shortcut(command)) : ""}`)
+    const items = [
+      { id: "settings", icon: "mods/workspace-chrome/settings.svg", label: "Settings", key: terse(shortcut("app.settings")), act: () => run("app.settings") },
+      { id: "keys", icon: "frame/settings/keyboard.svg", label: "Keys", key: terse(shortcut("app.help")), act: () => run("app.help") },
+      { id: "commands", icon: "mods/workspace-chrome/search.svg", label: "Commands", key: terse(shortcut("app.palette")), act: () => run("app.palette") },
+      { id: "find", icon: "mods/ram/find.svg", label: "Find", tip: "Search this terminal", key: terminalKey("terminal.search"), act: () => this.findInTerminal() },
+    ];
+    const widest = Math.max(...items.map(x => 14 * U + 5 * U + textW(x.key || x.label, 11 * U)));
+    const icons = compact || items.length * widest + 2 * 4 * U + (items.length - 1) * 2 * U > this.size.width - 2;
+    const item = x => h_flex().id(`ram-${x.id}`).flex_1().h(KEY_H).gap(5 * U).items_center().justify_center().rounded(2)
+      .cursor_pointer().hover(st => st.bg(t.hover)).tooltip(`${x.tip ?? x.label}${x.key ? "  " + x.key : ""}`)
       .on_mouse_down("left", stop)
-      .on_click((_e, cx) => { cx.stop_propagation(); run(command); })
-      .child(svg(icon).size(14 * U).flex_none().text_color(t.muted))
-      .when(!compact, el => el.child(div().text_size(11 * U).text_color(t.dim).child(terse(shortcut(command)) || label)));
-    return h_flex().flex_none().px(4 * U).py(KEY_PAD).gap(2 * U).border_t(1).border_color(t.border)
-      .child(item("settings", "mods/workspace-chrome/settings.svg", "Settings", "app.settings"))
-      .child(item("keys", "frame/settings/keyboard.svg", "Keys", "app.help"))
-      .child(item("commands", "mods/workspace-chrome/search.svg", "Commands", "app.palette"));
+      .on_click((_e, cx) => { cx.stop_propagation(); x.act(); })
+      .child(svg(x.icon).size(14 * U).flex_none().text_color(t.muted))
+      .when(!icons, el => el.child(div().text_size(11 * U).text_color(t.dim).child(x.key || x.label)));
+    return h_flex().flex_none().px(4 * U).py(KEY_PAD).gap(2 * U).border_t(1).border_color(t.border).children(items.map(item));
+  }
+
+  // Find: Herdr's find bar in the terminal you're in (terminal.search: its
+  // screen and scrollback), wherever the keyboard is. When the shown tab's
+  // focused pane isn't a terminal (a panel), its first terminal goes first;
+  // with none, Herdr says there's nothing to search.
+  findInTerminal() {
+    const f = focused();
+    if (!f?.terminal) {
+      const tab = f?.tab ?? shownTab()?.id, p = panes().find(x => x.tab === tab && x.terminal);
+      if (p) run("pane.focus", { pane: p.pane });
+    }
+    run("terminal.search");
   }
 
   // ---------------------------------------------------------------- the peek strip
@@ -2111,6 +2141,7 @@ export default class Ram extends View {
     if (role === "lang") return this.langView.render();
     if (role === "git-init") return this.gitView.render();
     if (role === "search") return this.searchView.render(cx);
+    if (role === "credits") return this.creditsView.render();
     this.countReviews();
     if (role === "side") return this.side(cx);
     if (role === "peek") return this.peek();

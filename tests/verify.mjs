@@ -225,6 +225,8 @@ const cx = { timer: { every: (ms, fn) => host.timers.push({ ms, fn }), after: ()
   // Key bindings a view installs (cx.bind_keys), and the clipboard.
   bind_keys(list) { (host.bindings ??= []).push(...list); return list.length; },
   write_to_clipboard(text) { host.clipboard = text; }, read_from_clipboard() { return host.clipboard; },
+  // A web address handed to the browser (cx.open_url).
+  open_url(u) { (host.urls ??= []).push(u); },
   focus_handle() { const h = { focus() { host.keyboard = h; }, is_focused: () => host.keyboard === h, release: () => true }; return h; } };
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0)); };
 const flatten = tree => typeof tree === "object" && tree ? [tree, ...tree.kids.flatMap(flatten)] : [];
@@ -5166,6 +5168,174 @@ console.log("PASS: RAM's right-click menu: Copy and Paste (on the terminal right
 }
 console.log("PASS: keys: C, < >, { }, e, I and P are bound after ^b, with the rest; the side column shows its keys by their parts");
 
+// ---- Credits (a click on the strip's space name, ^b R) ---------------------------------------
+{
+  const C = await import(await load("mods/ram/credits.js"));
+  const DIALOG = { mod: "ram", kind: "dialog", width: C.CREDITS_W, props: { role: "credits" } };
+  assert.equal(keysFile[`mod:${BAR}`]["shift-r"], `${BAR}.ram.credits`, "^b R: the credits (r is hunk's)");
+  Object.assign(host, { spaces, panes, agents: agentList, raw });
+  host.shared.set("ram.zoom", "space");
+  assert(spaces[0].active && spaces[0].tabs[0].active, "(api shows, at its first tab)");
+  // The strip's space name, top left (the strip is the same in both levels): a click
+  // opens them, and the press stays there (on the strip it would start a window drag).
+  {
+    const st = R(map, {}), name = withId(st, "ram-strip-space");
+    assert.equal(op(name, "tooltip")[0], "0x01 api \u00b7 click: credits (^b R)", "the name says what a click does");
+    assert(op(name, "cursor_pointer"), "and looks clickable");
+    host.overlays = []; host.stopped = false;
+    name.handlers["on_mouse_down:left"]({}, cx);
+    assert(host.stopped, "a press on it doesn't drag the window");
+    click(st, "ram-strip-space");
+    assert.deepEqual(host.overlays, [DIALOG], "the credits, a dialog with no height (Herdr fits it to what's in it)");
+  }
+  // ^b R: the strip's copy opens them (the key bar sends ram.credits; RAM hears "credits").
+  host.waiting = [];
+  view({}); await settle();
+  host.overlays = [];
+  host.waiting.at(-1)("credits"); await settle();
+  assert.deepEqual(host.overlays, [DIALOG], "^b R opens the same dialog");
+  // The dialog: what RAM is, who made it, its license and address, and what it builds on.
+  const props0 = { role: "credits", overlay: "oCr" };
+  const cv = view(props0);
+  assert(cv.creditsView.handle.is_focused(), "it takes the keyboard");
+  const ct = R(cv, props0), words = textOf(ct);
+  assert.equal(op(withId(ct, "ram-credits"), "track_focus")?.[0], cv.creditsView.handle, "with its root, so Enter reaches it");
+  for (const want of ["RAM", "a Herdr layout", C.ABOUT, "Made by", "Srivatsa Kannan", "Copyright 2026 Srivatsa Kannan \u00b7 Apache License 2.0",
+    "github.com/officialparacite/herdr-ram", "Thanks to",
+    "Night City", "by vib-z", "the agent model the sticks use (MIT)", "Traveler", "by Frank Lin", "git branch and counts (Apache 2.0)",
+    "Herdr", "the right-click menu and text size (Apache 2.0)", "GitHub Linguist", "LANG's colors (MIT)",
+    "serpl", "by Yassine Bridi", "the idea for search and replace", "rg-fzf", "the search window's keys and options"])
+    assert(words.includes(want), want);
+  assert.equal(C.ABOUT, "Work on many projects at once and see all of them on one screen.");
+  assert.deepEqual(textOf(withId(ct, "credits-author")), ["Srivatsa Kannan"], "the real name");
+  assert.deepEqual(C.THANKS.map(x => x[0]), ["Night City", "Traveler", "Herdr", "GitHub Linguist", "serpl", "rg-fzf"], "NOTICE's projects, then the ideas");
+  // Every line fits the dialog's width, inside its padding and border (nothing truncates).
+  const inner = C.CREDITS_W - 2 - 2 * 14 * 1.25;
+  for (const part of withId(ct, "ram-credits").kids) assert(widthOf(part) <= inner, `${textOf(part).join(" ")}: ${widthOf(part)} > ${inner}`);
+  const unfixed = n => ({ ...n, ops: n.ops.filter(([k]) => k !== "w" && k !== "flex_1") });
+  C.THANKS.forEach((x, k) => {
+    const row = withId(ct, `credits-thanks-${k}`), [who, what] = row.kids;
+    assert(widthOf(unfixed(who)) <= C.NAME_W && op(who, "w")[0] === C.NAME_W, `${x[0]}: its name and author fit their column`);
+    assert(C.NAME_W + op(row, "gap")[0] + widthOf(what.kids[0], op(what, "text_size")[0]) <= inner, `${x[0]}: its row fits`);
+  });
+  assert(C.CREDITS_W <= 680, `a dialog of a sensible width: ${C.CREDITS_W}`);
+  // The address opens that page in the browser; Close, Enter and Esc close it.
+  host.urls = []; host.stopped = false;
+  click(ct, "credits-repo");
+  assert.deepEqual(host.urls, [C.REPO], "the address opens in the browser");
+  assert(host.stopped && op(withId(ct, "credits-repo"), "tooltip")[0] === "Open it in your browser");
+  assert.equal(C.REPO, "https://github.com/officialparacite/herdr-ram");
+  host.closed = [];
+  click(ct, "credits-close");
+  assert.deepEqual(host.closed, ["oCr"], "Close closes it");
+  assert.equal(op(withId(ct, "credits-close"), "tooltip")[0], "Close  Esc");
+  const keyDown = withId(ct, "ram-credits").handlers.on_key_down;
+  host.closed = []; host.stopped = false;
+  keyDown({ keystroke: "a", key: "a" }, cx);
+  assert(!host.closed.length && !host.stopped, "other keys do nothing");
+  for (const k of ["enter", "escape"]) {
+    host.closed = []; host.stopped = false;
+    keyDown({ keystroke: k, key: k }, cx);
+    assert(host.closed.length === 1 && host.stopped, `${k} closes it`);
+  }
+  host.props = {};
+}
+console.log("PASS: credits: a click on the strip's space name or ^b R opens them (RAM, who made it, its license, its address that opens in the browser, what it builds on); every line fits; Close, Enter and Esc close them");
+
+// ---- Find: the bottom row's fourth button, Herdr's find bar in the terminal you're in -----------
+{
+  const UI = await import(await load("mods/ram/ui.js"));
+  const keysWas = host.keys;
+  if (keysFile.terminal?.["ctrl-shift-f"] === "terminal.search") assert.equal(UI.terminalKey("terminal.search"), "^\u21e7F", "the owner's ctrl-shift-f");
+  // As the right-click menu writes keys: on a Mac the cmd- one, else the shortest with a letter.
+  const tk = (list, platform = "macos") => {
+    host.keys = list.map(keys => ({ section: "terminal", keys, action: "terminal.search" }));
+    host.platform = platform;
+    const k = UI.terminalKey("terminal.search");
+    host.platform = "macos";
+    return k;
+  };
+  assert.equal(tk(["alt-f", "cmd-f"]), "\u2318F", "a Mac: the cmd- one");
+  assert.equal(tk(["alt-f", "cmd-f"], "linux"), "\u2325F", "elsewhere the shortest that ends in a letter");
+  assert.equal(tk(["ctrl-shift-f", "alt-f"], "linux"), "\u2325F", "the shortest");
+  assert.equal(tk(["f3", "ctrl-shift-f"], "linux"), "^\u21e7F", "with a letter over a shorter one without");
+  assert.equal(tk(["f3"]), "f3", "else the one there is");
+  assert.equal(tk([]), "", "none");
+  host.keys = [{ section: "global", keys: "alt-shift-f", action: "terminal.search" }];
+  assert.equal(UI.terminalKey("terminal.search"), "\u2325\u21e7F", "global keys count too");
+  host.keys = [{ section: "mod:other", keys: "f", action: "terminal.search" }];
+  assert.equal(UI.terminalKey("terminal.search"), "", "a mod's own keys don't");
+  host.keys = [{ section: "terminal", keys: "ctrl-shift-f", action: "terminal.search" }, ...keysWas.filter(k => k.action !== "terminal.search")];
+  host.shared.set("ram.zoom", "space");
+  side.size = { width: 340, height: 700 };
+  const row = t => flatten(t).find(n => n.kids.some(k => idOf(k) === "ram-settings"));
+  let kt = R(side, { role: "side" });
+  assert.deepEqual(row(kt).kids.map(idOf), ["ram-settings", "ram-keys", "ram-commands", "ram-find"], "on Settings, Keys and Commands' line, last");
+  assert.deepEqual(row(kt).kids.map(n => op(n, "tooltip")[0]), ["Settings  ^b s", "Keys  ^b ?", "Commands  ^b :", "Search this terminal  ^\u21e7F"]);
+  assert.deepEqual(textOf(withId(kt, "ram-find")), ["mods/ram/find.svg", "^\u21e7F"], "its own icon and its key");
+  assert.notEqual(textOf(withId(kt, "ram-commands"))[0], "mods/ram/find.svg", "not Commands' magnifier");
+  // Each button gets an equal share of the row; the keys show while the widest fits its
+  // share, else only the icons (the tooltips keep the keys).
+  const share = w => (w - 2 - 2 * 4 * 1.25 - 3 * 2 * 1.25) / 4;
+  const contentW = n => widthOf({ ...n, ops: n.ops.filter(([k]) => k !== "flex_1") });
+  let shownAt = null;
+  for (let w = 240; w <= 420; w += 1) {
+    side.size = { width: w, height: 700 };
+    const kids = row(R(side, { role: "side" })).kids, texts = kids.map(n => textOf(n).length);
+    assert(texts.every(n => n === texts[0]), `${w}: all or none`);
+    if (texts[0] === 2) { shownAt ??= w; assert(kids.every(n => contentW(n) <= share(w)), `${w}: each fits its share`); }
+    else assert(shownAt === null, `${w}: once the keys fit they stay`);
+  }
+  assert(shownAt > 240 && shownAt <= 340, `the keys show from ${shownAt} px: the column's least is icons only, its usual width has them`);
+  side.size = { width: 240, height: 700 };
+  kt = R(side, { role: "side" });
+  assert.deepEqual(textOf(row(kt)), ["mods/workspace-chrome/settings.svg", "frame/settings/keyboard.svg", "mods/workspace-chrome/search.svg", "mods/ram/find.svg"],
+    "at 240 px: only the icons");
+  assert.equal(op(withId(kt, "ram-find"), "tooltip")[0], "Search this terminal  ^\u21e7F", "the tooltip keeps the key");
+  // With no key for it: its word, and the tooltip says what it does.
+  host.keys = keysWas.filter(k => k.action !== "terminal.search");
+  side.size = { width: 340, height: 700 };
+  kt = R(side, { role: "side" });
+  assert.deepEqual([textOf(withId(kt, "ram-find")).at(-1), op(withId(kt, "ram-find"), "tooltip")[0]], ["Find", "Search this terminal"]);
+  host.keys = [{ section: "terminal", keys: "ctrl-shift-f", action: "terminal.search" }, ...host.keys];
+  kt = R(side, { role: "side" });
+  // The terminal you're in: its find bar, whichever part has the keyboard.
+  host.focused = { space: "s0", tab: "tab0-0", pane: "p0", terminal: "t1", shown: null, agent: null, cwd: null };
+  host.calls = []; host.stopped = false;
+  click(kt, "ram-find");
+  assert.deepEqual(host.calls, [{ name: "terminal.search", args: undefined }], "Herdr's find bar in that terminal");
+  assert(host.stopped);
+  // The tab's focused pane is a panel: its first terminal first.
+  const panesWas = host.panes;
+  host.panes = [{ pane: "pM", terminal: null, mod: "files", tab: "tab0-0", title: "files", focused: true },
+    { pane: "pX", terminal: "tX", tab: "tab0-1", title: "zsh", focused: false },
+    { pane: "pA", terminal: "tA", tab: "tab0-0", title: "zsh", focused: false },
+    { pane: "pB", terminal: "tB", tab: "tab0-0", title: "zsh", focused: false }];
+  host.focused = { space: "s0", tab: "tab0-0", pane: "pM", terminal: null, shown: null, agent: null, cwd: null };
+  host.calls = [];
+  click(kt, "ram-find");
+  assert.deepEqual(host.calls, [{ name: "pane.focus", args: { pane: "pA" } }, { name: "terminal.search", args: undefined }], "a panel: the tab's first terminal");
+  // Nothing focused: the shown tab's.
+  host.focused = null; host.calls = [];
+  click(kt, "ram-find");
+  assert.deepEqual(host.calls, [{ name: "pane.focus", args: { pane: "pA" } }, { name: "terminal.search", args: undefined }], "no focus: the shown tab's");
+  // A tab with no terminal: Herdr's own answer (nothing to search).
+  host.panes = [{ pane: "pM", terminal: null, mod: "files", tab: "tab0-0", title: "files", focused: true }];
+  host.focused = { space: "s0", tab: "tab0-0", pane: "pM", terminal: null, shown: null, agent: null, cwd: null };
+  host.calls = [];
+  click(kt, "ram-find");
+  assert.deepEqual(host.calls, [{ name: "terminal.search", args: undefined }], "no terminal: Herdr says so");
+  host.panes = panesWas;
+  // meta's side column (the main stick) has the same row.
+  host.shared.set("ram.zoom", "meta");
+  side.size = { width: 390, height: 700 };
+  assert.deepEqual(row(R(side, { role: "side" })).kids.map(idOf), ["ram-settings", "ram-keys", "ram-commands", "ram-find"], "meta has it too");
+  host.shared.set("ram.zoom", "space");
+  side.size = { width: 300, height: 700 };
+  host.keys = keysWas; host.focused = null; host.calls = [];
+}
+console.log("PASS: Find: the bottom row's fourth button opens Herdr's find bar in the terminal you're in (a panel: its tab's first terminal), its key as the right-click menu writes it (^\u21e7F); a narrow column shows only the icons");
+
 // ---- Inactive window, empty state, text ---------------------------------------------------
 spaces[0].tabs.forEach(t => t.active = t.id === "tab0-0");
 host.active = false;
@@ -5183,7 +5353,7 @@ assert(motions(RR()).length > 0, "active again: the scan line sweeps the sticks"
 host.shared.set("ram.zoom", "space");
 Object.assign(host, { spaces: [], panes: [], agents: [], raw: [], calls: [] });
 host.storage.clear();  // no exit history: nothing retained from closed spaces
-for (const role of [{}, { role: "side" }, { role: "peek" }, { role: "rams" }, { role: "lang" }, { role: "git-init" }]) {
+for (const role of [{}, { role: "side" }, { role: "peek" }, { role: "rams" }, { role: "lang" }, { role: "git-init" }, { role: "credits" }]) {
   const v = view(role);
   assert(v.render(cx), JSON.stringify(role));
 }
@@ -5195,7 +5365,7 @@ assert(textOf(view({ role: "side" }).render(cx)).includes("STACK \u2193  0"), "m
 await settle();
 assert(!host.calls.some(c => !c.name.startsWith("layout.")), "an empty window runs nothing but sizes");
 for (const file of ["mods/ram/main.js", "mods/ram/ui.js", "mods/ram/all.js", "mods/ram/hunk.js", "mods/ram/model.js", "mods/ram/git.js", "mods/ram/langs.js",
-  "mods/ram/pointers.js", "mods/ram/procs.js", "mods/ram/gitinit.js", "mods/ram/mod.json", "mods/ram-menu/main.js", "mods/ram-menu/mod.json", "mods/ram-menu/copy.svg", "mods/ram-menu/paste.svg",
+  "mods/ram/pointers.js", "mods/ram/procs.js", "mods/ram/gitinit.js", "mods/ram/credits.js", "mods/ram/find.svg", "mods/ram/mod.json", "mods/ram-menu/main.js", "mods/ram-menu/mod.json", "mods/ram-menu/copy.svg", "mods/ram-menu/paste.svg",
   "layouts/ram.json", "layouts/ram.svg", "themes/ram.json", `mods/${BAR}/main.js`]) {
   const content = await read(file);
   assert(!/\/(?:Users|home)\/[^/\s]+/.test(content), `private home path in ${file}`);
@@ -5306,7 +5476,7 @@ assert(barText.includes("follow") && barText.includes("f") && barText.includes("
   host.shared.set("ram.zoom", "space");
   barText = textOf(bar.render(cx2));
   for (const [k, label] of [["e", "enter"], ["I", "BP here"], ["P", "peek"], ["C", "new\u2026"], ["<", "move \u2190"], [">", "move \u2192"],
-    ["{", "move \u2191"], ["}", "move \u2193"], ["m", "meta"], ["i", "space"], ["r", "hunk"]])
+    ["{", "move \u2191"], ["}", "move \u2193"], ["m", "meta"], ["i", "space"], ["r", "hunk"], ["R", "credits"]])
     assert(pair(k, label), `${k} ${label}`);
   // In meta, P hides the sticks under its terminal.
   host.shared.set("ram.zoom", "meta");
