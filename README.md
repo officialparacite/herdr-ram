@@ -153,10 +153,10 @@ space level and still have the main stick in meta. In meta, clicks only select
 between memory and diff (and shows it if you hid it).
 
 Click the space's name at the top left (or press `^b R`) for the credits: who
-made RAM, its license, its address and what it builds on. The side column ends
-with Settings, Keys, Commands and Find, each with its key; Find opens Herdr's
-find bar in the terminal you're in (with Herdr's own keys, ⌘F on a Mac and
-`ctrl-shift-f` elsewhere).
+made RAM, its license and its address. The side column ends with Settings,
+Keys, Commands and Find, each with its key; Find opens Herdr's find bar in the
+terminal you're in (with Herdr's own keys, ⌘F on a Mac and `ctrl-shift-f`
+elsewhere).
 
 ## SP, BP and RET
 

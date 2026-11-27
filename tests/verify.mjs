@@ -5194,31 +5194,22 @@ console.log("PASS: keys: C, < >, { }, e, I and P are bound after ^b, with the re
   host.overlays = [];
   host.waiting.at(-1)("credits"); await settle();
   assert.deepEqual(host.overlays, [DIALOG], "^b R opens the same dialog");
-  // The dialog: what RAM is, who made it, its license and address, and what it builds on.
+  // The dialog: what RAM is, who made it, its license and its address, nothing else
+  // (NOTICE lists what it builds on).
   const props0 = { role: "credits", overlay: "oCr" };
   const cv = view(props0);
   assert(cv.creditsView.handle.is_focused(), "it takes the keyboard");
-  const ct = R(cv, props0), words = textOf(ct);
+  const ct = R(cv, props0);
   assert.equal(op(withId(ct, "ram-credits"), "track_focus")?.[0], cv.creditsView.handle, "with its root, so Enter reaches it");
-  for (const want of ["RAM", "a Herdr layout", C.ABOUT, "Made by", "Srivatsa Kannan", "Copyright 2026 Srivatsa Kannan \u00b7 Apache License 2.0",
-    "github.com/officialparacite/herdr-ram", "Thanks to",
-    "Night City", "by vib-z", "the agent model the sticks use (MIT)", "Traveler", "by Frank Lin", "git branch and counts (Apache 2.0)",
-    "Herdr", "the right-click menu and text size (Apache 2.0)", "GitHub Linguist", "LANG's colors (MIT)",
-    "serpl", "by Yassine Bridi", "the idea for search and replace", "rg-fzf", "the search window's keys and options"])
-    assert(words.includes(want), want);
-  assert.equal(C.ABOUT, "Work on many projects at once and see all of them on one screen.");
+  assert.deepEqual(textOf(ct), ["RAM", "a Herdr layout", "Made by", "Srivatsa Kannan", "Copyright 2026 Srivatsa Kannan \u00b7 Apache License 2.0",
+    "github.com/officialparacite/herdr-ram", "\u2197", "Esc", "close"], "only these, in this order");
   assert.deepEqual(textOf(withId(ct, "credits-author")), ["Srivatsa Kannan"], "the real name");
-  assert.deepEqual(C.THANKS.map(x => x[0]), ["Night City", "Traveler", "Herdr", "GitHub Linguist", "serpl", "rg-fzf"], "NOTICE's projects, then the ideas");
-  // Every line fits the dialog's width, inside its padding and border (nothing truncates).
-  const inner = C.CREDITS_W - 2 - 2 * 14 * 1.25;
-  for (const part of withId(ct, "ram-credits").kids) assert(widthOf(part) <= inner, `${textOf(part).join(" ")}: ${widthOf(part)} > ${inner}`);
-  const unfixed = n => ({ ...n, ops: n.ops.filter(([k]) => k !== "w" && k !== "flex_1") });
-  C.THANKS.forEach((x, k) => {
-    const row = withId(ct, `credits-thanks-${k}`), [who, what] = row.kids;
-    assert(widthOf(unfixed(who)) <= C.NAME_W && op(who, "w")[0] === C.NAME_W, `${x[0]}: its name and author fit their column`);
-    assert(C.NAME_W + op(row, "gap")[0] + widthOf(what.kids[0], op(what, "text_size")[0]) <= inner, `${x[0]}: its row fits`);
-  });
-  assert(C.CREDITS_W <= 680, `a dialog of a sensible width: ${C.CREDITS_W}`);
+  // As wide as its longest line, no wider: every line fits inside its padding and
+  // border (nothing truncates), and the longest leaves less than 10 px.
+  const inner = C.CREDITS_W - 2 - 2 * 14 * 1.25, widths = withId(ct, "ram-credits").kids.map(part => widthOf(part));
+  withId(ct, "ram-credits").kids.forEach((part, k) => assert(widths[k] <= inner, `${textOf(part).join(" ")}: ${widths[k]} > ${inner}`));
+  assert(inner - Math.max(...widths) < 10, `${C.CREDITS_W} wide for a longest line of ${Math.max(...widths)}`);
+  assert(C.CREDITS_W < 500, `${C.CREDITS_W}: narrower than with the thanks list (625)`);
   // The address opens that page in the browser; Close, Enter and Esc close it.
   host.urls = []; host.stopped = false;
   click(ct, "credits-repo");
@@ -5240,7 +5231,7 @@ console.log("PASS: keys: C, < >, { }, e, I and P are bound after ^b, with the re
   }
   host.props = {};
 }
-console.log("PASS: credits: a click on the strip's space name or ^b R opens them (RAM, who made it, its license, its address that opens in the browser, what it builds on); every line fits; Close, Enter and Esc close them");
+console.log("PASS: credits: a click on the strip's space name or ^b R opens them (RAM, who made it, its license and its address, which opens in the browser), as wide as their longest line; Close, Enter and Esc close them");
 
 // ---- Find: the bottom row's fourth button, Herdr's find bar in the terminal you're in -----------
 {
