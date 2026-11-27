@@ -5,6 +5,11 @@ RAM_HOME. A mutation that the tests don't notice ("SURVIVED") is a check missing
 
     python3 tests/mutate.py muts.json             mutate this package's files
     RAM_SRC=~/.config/herdr-app python3 tests/mutate.py muts.json
+    RAM_TEST=search-e2e.mjs python3 tests/mutate.py muts.json    against the end-to-end test
+    RAM_MUT_DIR=/tmp/ram-mut-2 python3 tests/mutate.py part2.json   its own copy, so verify.mjs
+                                                                   runs can go side by side
+                                                                   (never the end-to-end test:
+                                                                   it checks $TMPDIR's leftovers)
 
 muts.json is a list of [name, path, old, new]: in the copy of PATH, OLD (which
 must occur exactly once) becomes NEW.
@@ -17,7 +22,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.expanduser(os.environ.get("RAM_SRC", os.path.dirname(HERE)))
-COPY = "/tmp/ram-mut"
+TEST = os.environ.get("RAM_TEST", "verify.mjs")
+COPY = os.environ.get("RAM_MUT_DIR", "/tmp/ram-mut")
 PARTS = ["keys.json", ".gitignore", "RECIPE.md", "layouts", "themes", "mods/ram", "mods/prefix", "mods/text-bigger",
          "mods/text-smaller", "mods/ram-menu", "mods/ram-prefix", "mods/ram-text-bigger", "mods/ram-text-smaller",
          "mods/night-city", "mods/traveler-spaces"]
@@ -48,7 +54,7 @@ def run(muts):
             results.append((name, f"BAD MUTATION (found {n}x)", ""))
             continue
         open(f, "w").write(text.replace(old, new))
-        r = subprocess.run(["node", os.path.join(HERE, "verify.mjs")], env={**os.environ, "RAM_HOME": COPY},
+        r = subprocess.run(["node", os.path.join(HERE, TEST)], env={**os.environ, "RAM_HOME": COPY},
                            capture_output=True, text=True, timeout=600)
         out = r.stdout + r.stderr
         msg = next((l.strip() for l in out.splitlines() if "AssertionError" in l or "Error:" in l), "")

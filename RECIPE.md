@@ -7,8 +7,8 @@ one project (a repo with its agents and terminals), drawn as a stick of RAM.
 The meta view lines every space up below your terminal, so one glance shows
 which agents are working, which need you (in red), what's running and what
 changed in each repo. Click a stick to jump to that space; the space view
-gives the one you work in the room. Comes with lazygit, hunk, a search window,
-a ctrl-b key bar and a Neovim theme.
+gives the one you work in the room. Comes with lazygit, hunk, search and
+replace, a ctrl-b key bar and a Neovim theme.
 
 ![RAM](preview.png)
 
@@ -101,22 +101,35 @@ a ctrl-b key bar and a Neovim theme.
   here` and `Open a recent repo ▸` (lazygit's recent repos that still are
   repos, this folder left out), and git's own error when `git init` fails.
 - **The search window** (a dialog 0.9 x 0.86 of the window, `popover`
-  background): a row with `SEARCH` (cyan), the space, a scope button
-  (`Alt-S repo` or `folder`) and the folder, the count (`123 lines`,
-  `20,000+ lines` at the cap) and `Alt-/ keys` / `Esc close`; the query box
-  (amber border) with its mode button (`Ctrl-F Content (regex)`,
-  `Content (pcre2)` or `Filename (fuzzy)`), an amber cursor and a `✕`; the
-  option buttons (`Alt-P pcre2`, `Alt-V invert`, `Alt-I hidden`,
-  `Alt-U one per file`, then `Ctrl-P preview`, `Alt-W wrap`, `Alt-N numbers`),
-  lit amber while on; the results (a pick box, the folder dim and the file's
-  name, `:line:column`, the line without its indent and its matches in amber,
-  the cursor's row lit) beside the preview (55% to start; the divider between
-  them drags from 20% to 80%), which shows the file in bat's colors with line
-  numbers, the match's line lit amber; and the action buttons (`Enter files`,
-  `Ctrl-O lines`, `Alt-Enter JSON`, `Alt-C copy`, `Ctrl-E edit`, `n picked`,
-  `Tab pick ↓`, `Shift-Tab pick ↑`, `Ctrl-A all`, `Ctrl-Z none`). Keys are
-  written in words, as rg-fzf's help writes them. Only the rows and lines that
-  fit are drawn.
+  background): a row with `SEARCH` (cyan; `SEARCH & REPLACE` while replacing),
+  the space, a scope button (`Alt-S repo` or `folder`) and the folder, the
+  count (`123 lines`, `20,000+ lines` at the cap; `4 matches in 2 files` while
+  replacing) and `Alt-/ keys` / `Esc close`; the query box (amber border while
+  it types) with `Alt-Up find` while replacing, its mode button
+  (`Ctrl-F Content (regex)`, `Content (literal)`, `Content (pcre2)` or
+  `Filename (fuzzy)`), an amber cursor and a `✕`; while replacing, a row under
+  it: `Alt-Down replace with`, the new text's box and its `✕`,
+  `Alt-K keep case`, `Alt-R replace`, `Alt-A replace all` and `Alt-Z undo`;
+  the option buttons (`Ctrl-R replace`, `Alt-M match case`,
+  `Alt-B whole words`, `Alt-L literal`, `Alt-P pcre2`, `Alt-V invert`,
+  `Alt-I hidden`, `Alt-U one per file`, then `Ctrl-P preview`,
+  `Alt-W wrap preview`, `Alt-Shift-W wrap list`, `Alt-N numbers`), lit amber
+  while on (invert and one per file dim while replacing); the results (a pick
+  box, the folder dim and the file's name, `:line:column`, the line without
+  its indent and its matches in amber, or while replacing each match struck
+  out in red with its new text after it in green; the cursor's row lit) beside
+  the preview (55% to start; the divider between them drags from 20% to 80%),
+  which shows the file in bat's colors with line numbers, the cursor's line
+  lit amber and the list's matches on an amber background; while replacing,
+  each line that changes shows twice, struck out on a red tint, then `+` and
+  the new line on a green tint; a note row for what a replace did (green,
+  amber when it left some alone, red when nothing changed); and the action
+  buttons (`Enter files`, `Ctrl-O lines`, `Alt-Enter JSON`, `Alt-C copy`,
+  `Ctrl-E edit`, `n picked`, `Tab pick ↓`, `Shift-Tab pick ↑`, `Ctrl-A all`,
+  `Ctrl-Z none`), whose place a replace's question takes
+  (`Replace 4 matches in 2 files?`, `Enter yes`, `Esc no`). Keys are written
+  in words, as rg-fzf's help writes them. Only the rows and lines that fit are
+  drawn.
 - **The terminal menu** (right-click on a terminal, mod `ram-menu`): Copy and
   Paste, then Herdr's own items (split right and down, zoom, where
   right-clicks go, back to the parent, close pane), each with its key.
@@ -193,16 +206,20 @@ a ctrl-b key bar and a Neovim theme.
   picks are copied). Each change of the query or an option starts a run:
   `sh -c` with a script that stops the run before (`kill` on its process
   group) and removes its folder, makes one with `mktemp -d` in `$TMPDIR`, and
-  runs ripgrep in the background with rg-fzf's options (`--ignore-case`, the
-  default engine or `--engine pcre2`,
+  runs ripgrep in the background with rg-fzf's options (`--ignore-case`, or
+  `--case-sensitive` with `Alt-M`; the default engine or `--engine pcre2`,
   `--max-columns 500 --max-columns-preview`, `--hidden`, `--invert-match`,
-  `--max-count 1`; an empty query lists the files with `rg --files`; content
-  mode's file name query picks the files searched and filename mode picks the
-  results by file name, both with `fzf --filter`), writing 500-line files the
-  window reads every 40 ms, up to 20,000 lines. The last results stay until
-  the new ones come, and only the newest query runs. The preview runs
-  `bat --line-range` around the line. Enter, `Ctrl-O` and `Alt-Enter` put the
-  files (once each, sorted, quoted, on one line), the lines
+  `--max-count 1`, and `--word-regexp` with `Alt-B`, `--fixed-strings` with
+  `Alt-L`; an empty query lists the files with `rg --files`; content mode's
+  file name query picks the files searched and filename mode picks the results
+  by file name, both with `fzf --filter`), writing 500-line files the window
+  reads every 40 ms, up to 20,000 lines. The last results stay until the new
+  ones come, and only the newest query runs; until then (after `Alt-S`, say)
+  the rows' paths are from the folder they were found in, and Enter, `Ctrl-E`
+  and the preview use that folder. The preview runs `bat --line-range` around
+  the line. `Alt-Shift-W` wraps the list: a row on as many lines as it needs,
+  the cursor's row kept whole on screen. Enter, `Ctrl-O` and `Alt-Enter` put
+  the files (once each, sorted, quoted, on one line), the lines
   (`file:line:column:text`) or rg-fzf's JSON (`rg --json` for the whole lines
   and what matched) on the clipboard, focus the terminal you came from and
   paste (`terminal.paste`), then close; paths are relative to that terminal's
@@ -213,6 +230,36 @@ a ctrl-b key bar and a Neovim theme.
   window (`ram.search.top`). `ram-search` (paths, or a list on stdin) opens
   the window in a tab of its own (`tab.new` with `mod: ram`) for those files,
   and a pick closes that tab.
+- Replace (the window's own; the idea is serpl's): `Ctrl-R` turns it on
+  (content mode; invert and one per file go off, and their keys say so) and
+  off again (the search as it was; the new text stays, and is kept with the
+  space's search). Each window opens with it off. While it's on, a run with a
+  query is `rg --no-config --json --glob=!.git --replace <new text>` with the
+  search's options, its lines kept to `{"type":"match"`: each match comes with
+  what ripgrep makes of it (`$1`, `${name}`, `$$`), so ripgrep computes every
+  new text. `Alt-Up` and `Alt-Down` choose the field that types. `Alt-K` puts
+  each new text in its match's case (all capitals, a capital first, else
+  small). `Alt-R` replaces in the picked lines (else the cursor's), `Alt-A` in
+  every line listed once the run is done and not cut off at 20,000; only from
+  the newest search's rows. `Alt-A` always asks first (in the foot), `Alt-R`
+  only outside a repo; Enter says yes, Esc no, other keys do nothing, and any
+  other click lets the question go. Each file: never in `.git`, never one
+  whose name isn't UTF-8; `readTextFile`, every listed line must still read as
+  the JSON's `lines.text` (else the file is left alone: it changed since the
+  search), the lines swapped, then `writeTextFile(file, new, old)`, which
+  writes only over the text it was given. A file `writeTextFile` can't take
+  (over 1 MiB or not UTF-8) goes through a shell script and a plan file (each
+  change's line number, the line as found and the new one, escaped) in the
+  window's own `mktemp -d` folder: it refuses a file with a NUL (binary, or
+  UTF-16, which ripgrep transcodes), swaps only lines that still read as found
+  (awk on the bytes, `LC_ALL=C`), adds a last line end only if the file had
+  one, keeps the file's mode and writes through its link, keeps a copy for
+  undo and moves the new file in after checking `cksum` again. `Alt-Z` puts
+  back the last replace's files, each only while it's still what the replace
+  wrote (the last 50 replaces). Nothing closes the window while a replace or
+  undo runs. The note row says what was replaced and what was left alone, and
+  why; the preview reads the files again. It's off for a space on another
+  machine (`writeTextFile` writes the files of the computer Herdr runs on).
 - lazygit: a GIT line, a stick's git line or `^b g` opens `lazygit <folder>`
   in a tab, one per repo, for the repo the space is named after (the repo top
   of its first terminal's folder; GIT, HUNK, LANG and the stick's git line use
@@ -268,18 +315,18 @@ a ctrl-b key bar and a Neovim theme.
   space); `procs.js` the running commands (`terminals()`: a shell whose
   foreground program isn't the shell; their last lines from `hc read`);
   `gitinit.js` GIT's dialog; `search.js` the search window (its run script,
-  the preview, the keys; Tab and Shift-Tab bound with `cx.bind_keys` in its
-  own key context); `ram-search` the shell entry for a file list; `all.js` the
-  main stick; `hunk.js` the reviews (it runs `hunk session list --json` every
-  3 s while a review is open, else every 15 s); `git.js` branch and counts per
-  space (`git status`, `git rev-parse`, `git diff --numstat`, again on
-  `watchFolder` changes and every minute); `model.js` the agents and exit
-  history; `ui.js` the colors and small parts; `langs.js` LANG: the language
-  table (name, GitHub's color, kind, extensions, file names),
-  `git ls-tree -r -l -z --full-tree HEAD` at the repo's top on its machine
-  (again when the branch changes and every minute), the summary and the dialog
-  (role `lang`, modes `list`, `files`, `ext`); `arrow.svg` the frames' arrow
-  head.
+  the preview, the keys, the replace and its two scripts; Tab, Shift-Tab and
+  Esc bound with `cx.bind_keys` in its own key context); `ram-search` the
+  shell entry for a file list; `all.js` the main stick; `hunk.js` the reviews
+  (it runs `hunk session list --json` every 3 s while a review is open, else
+  every 15 s); `git.js` branch and counts per space (`git status`,
+  `git rev-parse`, `git diff --numstat`, again on `watchFolder` changes and
+  every minute); `model.js` the agents and exit history; `ui.js` the colors
+  and small parts; `langs.js` LANG: the language table (name, GitHub's color,
+  kind, extensions, file names), `git ls-tree -r -l -z --full-tree HEAD` at
+  the repo's top on its machine (again when the branch changes and every
+  minute), the summary and the dialog (role `lang`, modes `list`, `files`,
+  `ext`); `arrow.svg` the frames' arrow head.
 - Shared state: `ram.zoom` (meta or not), `ram.sp` (SP: space, tab, pane),
   `ram.bp` (each space's BP tab), `ram.frame` (the space you work in),
   `ram.came` (where you were when a tool's tab showed), `ram.goto` (what the
@@ -308,7 +355,9 @@ a ctrl-b key bar and a Neovim theme.
   dialog `git var GIT_DEFAULT_BRANCH`, `lazygit --print-config-dir` (then it
   reads lazygit's `state.yml`) and, when you press Create, `git init`. Search
   runs `sh -c` (ripgrep, fzf, awk), `bat`, `rg --json` and `cat`, `kill` and
-  `rm` on its own folders in `$TMPDIR`. No mod opens a network connection.
+  `rm` on its own folders in `$TMPDIR`; a replace `readTextFile` and
+  `writeTextFile`, and for a big file its own `sh -c` (awk, `cksum`, `cp -p`,
+  `mv`). No mod opens a network connection.
 - `mods/ram-menu`: the terminals' right-click menu, named by the layout
   root's `terminal_menu`. Herdr opens it as a popup with `{tab: "pane",
   target: {pane, terminal}}` (its mod.json makes it 250x300). Copy and Paste
@@ -451,6 +500,13 @@ not renamed. Everything replaced goes first to
   move focus): bind them with `cx.bind_keys` in a key context of the window's
   own, on every open (a keys.json reload clears script bindings).
   `readTextFile` refuses text that isn't UTF-8: read such files with `cat`.
+- Replace: `writeTextFile` takes at most 1 MiB of UTF-8, on the computer Herdr
+  runs on, and `readTextFile` refuses the rest; that's why big and non-UTF-8
+  files go through the script. ripgrep's JSON leaves a UTF-8 BOM out of line
+  1's `lines.text` and transcodes UTF-16, so keep the BOM and refuse a file
+  with a NUL. In tests, `rg --passthru -r` gives a whole file as ripgrep
+  replaces it, but adds a line end to a last line that had none. macOS's `tr`
+  refuses a file name that isn't UTF-8 unless `LC_ALL=C`.
 - Tested on Herdr 0.1.18 on macOS. Re-check after app updates.
 
 **Done when:**
@@ -488,6 +544,10 @@ not renamed. Everything replaced goes first to
 - `^b /` opens the search window at the space's repo: typing shows the matches
   as they come, the preview shows the file at the line, Enter puts the picked
   files at the prompt of the terminal you came from, and Esc closes it.
+- With `Ctrl-R` and a new text, the list strikes each match out with its new
+  text after it; `Alt-A` and Enter replace every listed line and the preview
+  shows the files as they are now; `Alt-Z` puts them back. `Ctrl-R` again
+  turns replace off, and the next `^b /` opens to search.
 - `^b w`, `j` shows the next space at once, with a cyan outline on it while
   navigating; `l` shows its next tab, `L` the pane to the right, and Esc goes
   back to where you started.
