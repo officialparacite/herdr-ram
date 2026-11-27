@@ -29,9 +29,9 @@ and switching takes you back to it.
 For example: you work in api `&2` and watch an agent in testing `*1` from
 meta. `^b i` takes you back to api `&2`, and `^b m` to testing `*1`.
 
-lazygit and hunk open in tabs of their own, search (`^b /`) in a window over
-the tab you're in, the `ctrl-b` key bar works in every layout, and an optional
-Neovim theme follows the layout.
+lazygit and hunk open in tabs of their own, search and replace (`^b /`) in a
+window over the tab you're in, the `ctrl-b` key bar works in every layout, and
+an optional Neovim theme follows the layout.
 
 ## What's in it
 
@@ -272,15 +272,41 @@ Drag the divider between them, or use `Alt-[` and `Alt-]`.
   instead. They go through the clipboard, so it holds them afterwards.
 - `Ctrl-E`, or a double-click, opens `$EDITOR` at the line in a new tab.
 - `Ctrl-F` switches to filename mode (fzf's fuzzy match, with a query of its
-  own); `Alt-P` PCRE2, `Alt-V` invert, `Alt-I` hidden files, `Alt-U` one
-  result per file, `Alt-S` the terminal's folder instead of its repo.
+  own); `Alt-M` match case, `Alt-B` whole words, `Alt-L` literal (no regex),
+  `Alt-P` PCRE2, `Alt-V` invert, `Alt-I` hidden files, `Alt-U` one result per
+  file, `Alt-S` the terminal's folder instead of its repo.
 - `Tab` / `Shift-Tab` pick and move, `Ctrl-A` / `Ctrl-Z` all or none; `Ctrl-P`
-  the preview, `Ctrl-D` / `Ctrl-U` its scroll, `Alt-W` wrap, `Alt-N` line
-  numbers; `Alt-/` or `F1` lists every key. Esc closes.
-- Each space keeps its last search, and the window keeps its divider, for the
-  next time.
+  the preview, `Ctrl-D` / `Ctrl-U` its scroll, `Alt-W` wraps its long lines
+  and `Alt-Shift-W` the list's, `Alt-N` line numbers; `Alt-/` or `F1` lists
+  every key. Esc closes.
+- Each space keeps its last search (its new text too), and the window keeps
+  its divider, for the next time.
 - `git ls-files | ram-search` (or `ram-search <paths>`) opens it in a tab of
   its own for those files; picks go back to that terminal.
+
+### Replace
+
+`Ctrl-R` adds a row under the query for the new text, and the search becomes
+ripgrep's replace: in the list each match is struck out in red with what it
+becomes after it in green, and the preview shows each line that changes twice,
+as it is and as it will be. `$1` or `${name}` put in the regex's groups and
+`$$` a dollar sign; an empty new text deletes the match. `Ctrl-R` again turns
+replace off: the search as it was, the new text kept for next time. Each
+window opens to search.
+
+- `Alt-Up` and `Alt-Down` (or a click) choose the field you type in.
+- `Alt-R` replaces in the picked lines (else the current one), `Alt-A` in
+  every line listed once the search is done. `Alt-A` always asks first, and so
+  does `Alt-R` outside a git repo (Enter yes, Esc no). `Alt-Z` puts back what
+  the last replace changed, while the window is open. `Alt-K` keeps each
+  match's case: `User` becomes `Account`, `USER` becomes `ACCOUNT`.
+- Only the lines listed change, and each is checked against the file first: a
+  file that changed since the search is left alone, and the note row says so.
+  Line ends, a last line without one, a UTF-8 BOM, permissions and links stay
+  as they were, in files over 1 MiB and files that aren't UTF-8 too. Files in
+  `.git`, binary files and UTF-16 files aren't touched.
+- Replace changes the files of the computer the window runs on, so it's off in
+  a space on another machine.
 
 ## Neovim (optional, LazyVim + aether.nvim)
 
@@ -312,11 +338,13 @@ node tests/search-e2e.mjs   # the search window, for real
 They load this repo's mods with a stand-in for Herdr and check what they draw
 and run; no window, terminal or network is touched. They read the keys from
 this repo's `keys.json`, so a home with keys of its own shows other hints than
-they expect. `tests/mutate.py` breaks the code in a copy, one change at a
-time, to show the checks notice. `tests/search-e2e.mjs` runs the search
+they expect. One part drives the search window at random (keys, clicks, typing
+and results coming in, in any order; seeded, so a failure repeats) and checks
+it after every step. `tests/mutate.py` breaks the code in a copy, one change
+at a time, to show the checks notice. `tests/search-e2e.mjs` runs the search
 window's code with real ripgrep, fzf, bat and `ram-search` on a folder it
-makes in `$TMPDIR` (and removes), and compares what it finds with ripgrep's
-own results.
+makes in `$TMPDIR` (and removes), and compares what it finds, and what each
+replace writes, with ripgrep's own.
 
 ## Removing
 

@@ -1656,12 +1656,14 @@ console.log("PASS: ^b / and the space level's / search: the search window over t
   // query (the files), every option off.
   assert.equal(host.keyboard, sv.searchView.handle, "the window has the keyboard");
   assert.deepEqual(host.bindings, [{ keystroke: "tab", action: "ram_search.next", context: "RamSearch" },
-    { keystroke: "shift-tab", action: "ram_search.prev", context: "RamSearch" }]);
+    { keystroke: "shift-tab", action: "ram_search.prev", context: "RamSearch" },
+    { keystroke: "escape", action: "ram_search.escape", context: "RamSearch" }]);
   let tree = SV();
   assert.deepEqual(op(withId(tree, "ram-search"), "key_context"), ["RamSearch"]);
   assert(withId(tree, "ram-search").handlers["on_action:ram_search.next"] && withId(tree, "ram-search").handlers["on_action:ram_search.prev"]);
   assert.equal(runs.length, 1, "one run");
-  assert.deepEqual(args(1), ["", "", "content", "", "", "", "", "default", "", "", "1"], "nothing to stop, the files, a sweep of old folders");
+  assert.deepEqual(args(1), ["", "", "content", "", "", "", "", "default", "", "", "1", "", "", "", "", ""],
+    "nothing to stop, the files, a sweep of old folders, no other option, not a replace");
   assert.deepEqual(runs[0].opts, { cwd: "/repo/api", on: null }, "in the repo");
   assert(textOf(tree).includes("Searching\u2026"), "nothing yet");
   // Results stream in: whole lines only, chunk after chunk.
@@ -1706,8 +1708,8 @@ console.log("PASS: ^b / and the space level's / search: the search window over t
   // The preview: bat, around the line, in its colors; the line lit, numbered.
   tree = SV(); await settle(); tree = SV();
   const batMain = bats.find(b => b.args.at(-1) === "src/main.rs");
-  assert.deepEqual(batMain.args, ["COLORTERM=truecolor", "bat", "--color=always", "--paging=never", "--wrap=never", "--style=plain", "--tabs=4",
-    "--line-range", "1:331", "--", "src/main.rs"], "bat for the file, plain style (the window draws the rest), your theme");
+  assert.deepEqual(batMain.args, ["COLORTERM=truecolor", "bat", "--color=always", "--paging=never", "--wrap=never", "--style=plain", "--tabs=0",
+    "--line-range", "1:331", "--", "src/main.rs"], "bat for the file, plain style (the window draws the rest, tabs too), your theme");
   assert.deepEqual(batMain.opts, { cwd: "/repo/api", on: null, timeout: 15000 });
   assert.equal(bats.filter(b => b.args.at(-1) === "src/main.rs").length, 1, "once: its lines are kept while the window is open");
   const pv = withId(tree, "search-pv");
@@ -1859,9 +1861,10 @@ console.log("PASS: ^b / and the space level's / search: the search window over t
   // Closing stops its run and keeps the search for this space.
   stops.length = 0;
   await sv6.close();
-  assert.deepEqual(stops, [[String(4000 + runs.length), D6, ""]], "its run stopped, its folder removed");
+  assert.deepEqual(stops, [[String(4000 + runs.length), D6, "", ""]], "its run stopped, its folder removed (no list, no replace's folder)");
   const kept = host.shared.get(S.SEARCH_LAST).spaces.s0;
-  assert.deepEqual(kept, { q: "hel", fq: "", mode: "content", hidden: false, invert: false, pcre2: false, unique: false, scope: "repo" });
+  assert.deepEqual(kept, { q: "hel", fq: "", mode: "content", hidden: false, invert: false, pcre2: false, unique: false, scope: "repo",
+    case: false, word: false, literal: false, rep: "", keep: false });
   delete shellPaneOf.cwd;
   host.files = filesBefore;
   host.execHook = null;
@@ -1937,8 +1940,10 @@ console.log("PASS: the search window: results stream in from its run's files, ty
   assert.deepEqual([sv.searchView.field(), sv.searchView.at], ["bar\u2248oo", 4], "where Option types (\u2248), it's typed");
   withId(T(), "search-field").handlers["on_mouse_down:left"]({ local_position: { x: 2.2 * 12 * 1.25 * 0.6 } }, cx);
   assert.equal(sv.searchView.at, 2, "a click between characters");
+  await settle();
+  const runsBeforeClear = runs.length;
   click(T(), "search-clear"); await settle();
-  assert.deepEqual([sv.searchView.field(), last()[3]], ["", ""], "\u2715 clears it: the files again");
+  assert.deepEqual([sv.searchView.field(), last()[3], runs.length], ["", "", runsBeforeClear + 1], "\u2715 clears it: the files again");
   // \u2325/ and F1: every key, each a button that does it.
   k("alt-/");
   tree = T();
@@ -1967,14 +1972,16 @@ console.log("PASS: the search window: results stream in from its run's files, ty
   k("alt-/");
   for (const t2 of [T(), (k("alt-/"), T())])
     for (const x of [...textOf(t2), ...tips(t2)]) assert(!symbols.test(x), `in words, not symbols: ${x}`);
-  // Every key has a button on the window (or the wheel: Ctrl-D Ctrl-U scroll the preview).
+  // Every key has a button on the window (or the wheel: Ctrl-D Ctrl-U scroll the preview; the replace
+  // row's own, with the row, in the replace's checks).
   tree = T();
   const buttons = { files: "search-files", lines: "search-lines", json: "search-json", copy: "search-copy", edit: "search-edit",
     mode: "search-mode", pcre2: "search-pcre2", invert: "search-invert", hidden: "search-hidden", unique: "search-unique",
     scope: "search-scope", next: "search-next", prev: "search-prev", all: "search-all", none: "search-none", preview: "search-preview",
-    wrap: "search-wrap", numbers: "search-numbers", keys: "search-keys", close: "search-close" };
+    wrap: "search-wrap", numbers: "search-numbers", keys: "search-keys", close: "search-close", replace: "search-replace-on",
+    case: "search-case", word: "search-word", literal: "search-literal", listwrap: "search-listwrap" };
   for (const [, action] of S.KEYS) {
-    if (action === "pvdown" || action === "pvup" || action === "divleft" || action === "divright") continue;
+    if (["pvdown", "pvup", "divleft", "divright", "keep", "apply", "applyall", "undo", "tofind", "torep"].includes(action)) continue;
     assert(withId(tree, buttons[action]), `${action}: a button`);
     assert.match(op(withId(tree, buttons[action]), "tooltip")[0], /  \S+$/, `${action}'s tooltip ends with its key`);
   }
@@ -1988,6 +1995,42 @@ console.log("PASS: the search window: results stream in from its run's files, ty
   // Options are each space's: s1's are kept, s0's untouched.
   assert.deepEqual(Object.keys(host.shared.get(S.SEARCH_LAST).spaces), ["s1"]);
   assert.equal(host.shared.get(S.SEARCH_LAST).spaces.s1.invert, true);
+  host.execHook = null;
+}
+{
+  // Alt-S: until the other folder's rows come, the rows shown are from where they were found:
+  // Enter gives their paths from there, Ctrl-E opens there, the preview reads that file.
+  const DIR = n => `/tmp/T/ram-search.F${String(n).padStart(5, "0")}`;
+  const runs = [], bats = [];
+  host.execHook = (command, args, opts) => {
+    if (command === "sh" && args[1] === S.RUN_SH) { const n = runs.push(opts.cwd); return { code: 0, stdout: `${7500 + n}\n${DIR(n)}\n`, stderr: "" }; }
+    if (command === "sh" && args[1] === S.STOP_SH) return { code: 0, stdout: "", stderr: "" };
+    if (command === "env" && args[1] === "bat") { bats.push([opts.cwd, args.at(-1)]); return { code: 0, stdout: "x\n", stderr: "" }; }
+    return null;
+  };
+  const filesBefore = host.files;
+  host.files = {};
+  host.shared.set(S.SEARCH_LAST, { look: {}, spaces: { s1: { q: "x" } } });
+  const p = { role: "search", at: 223, space: "s1", name: "web", machine: null, overlay: "o24",
+    target: { pane: "shell-pane", terminal: "shell" }, folder: "/repo/web/app", repo: "/repo/web" };
+  host.shared.set(S.SEARCH_TOP, 223);
+  const sv = view(p); await settle();
+  const T = () => R(sv, p);
+  const k = ks => withId(T(), "ram-search").handlers.on_key_down({ key: ks.split("-").pop(), keystroke: ks, modifiers: {} }, cx);
+  const drawn = withId(T(), "ram-search");   // (drawn before the rows come: nothing for the preview to read yet)
+  host.files[`${DIR(1)}/000000`] = ["app/x.txt", "3", "1", "x"].join("\x1f") + "\n";
+  host.files[`${DIR(1)}/end`] = "";
+  await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle();
+  drawn.handlers.on_key_down({ key: "s", keystroke: "alt-s", modifiers: { alt: true } }, cx); await settle();
+  T(); await settle();
+  assert.deepEqual([runs, bats], [["/repo/web", "/repo/web/app"], [["/repo/web", "app/x.txt"]]], "the folder's search runs; the preview reads the repo's app/x.txt");
+  assert.equal(sv.searchView.pv.get("/repo/web/app/x.txt")?.lines[0], "x", "kept by its whole path");
+  k("ctrl-e");
+  assert.deepEqual(host.calls.at(-1).args.folder, "/repo/web", "Ctrl-E opens it from where it was found");
+  k("enter");
+  assert.equal(host.clipboard, "x.txt", "Enter: its path from the folder you're in (the prompt's)");
+  await sv.searchView.close();
+  host.files = filesBefore;
   host.execHook = null;
 }
 console.log("PASS: the search window's options: \u2325v \u2325i \u2325p \u2325u and their buttons, ^f filename mode with its own query, \u2325s repo or folder, the field's keys and clicks, \u2325/ F1 the key list (each key a button); a newer window closes this one; each space keeps its own");
@@ -2012,7 +2055,7 @@ console.log("PASS: the search window's options: \u2325v \u2325i \u2325p \u2325u 
   const T = () => R(sv, p);
   const k = (ks, extra = {}) => { withId(T(), "ram-search").handlers.on_key_down({ key: ks.split("-").pop(), keystroke: ks, modifiers: {}, ...extra }, cx); };
   const poll = host.timers.filter(t => t.ms === 40).at(-1).fn;
-  assert.deepEqual(runs[0].args.slice(2), ["content", "", "", "", "", "default", "", LIST, "1"], "a fresh search (not the space's), on the list");
+  assert.deepEqual(runs[0].args.slice(2), ["content", "", "", "", "", "default", "", LIST, "1", "", "", "", "", ""], "a fresh search (not the space's), on the list");
   assert.deepEqual(runs[0].opts, { cwd: "/repo/api", on: null }, "from where ram-search ran");
   assert.equal(sv.searchView.p.space, "s0", "its space: where it opened");
   assert(textOf(withId(T(), "search-scope")).includes("files given"), "the scope is the list");
@@ -2076,7 +2119,7 @@ console.log("PASS: the search window's options: \u2325v \u2325i \u2325p \u2325u 
   assert.equal(host.shared.get(S.SEARCH_LAST).spaces.s0.q, "kept", "a list's search isn't kept for the space");
   stops.length = 0;
   await sv.close();
-  assert.deepEqual(stops, [[String(9003), DIR(3), LIST]], "closing stops its run and removes the list");
+  assert.deepEqual(stops, [[String(9003), DIR(3), LIST, ""]], "closing stops its run and removes the list");
   // Esc in the tab (no dialog: Esc comes as a key) closes it too.
   const sv2 = view(p); await settle();
   host.calls = [];
@@ -2138,13 +2181,23 @@ console.log("PASS: the search window's options: \u2325v \u2325i \u2325p \u2325u 
   // file's last screen and no further.
   const got = bats.length;
   key("ctrl-d", 100);
-  assert.equal(sv.searchView.pvTop, sv.searchView.pv.get("big.txt").b - 20 + 1, "no further than bat's lines");
+  assert.equal(sv.searchView.pvTop, sv.searchView.pv.get("/repo/api/big.txt").b - 20 + 1, "no further than bat's lines");
   for (let i = 0; i < 20; i++) { key("ctrl-d", 50); T(); await settle(); }
   assert(bats.length > got + 1, "bat again for the lines further down");
   assert.equal(sv.searchView.pvTop, 2000 - 20 + 1, "down to the file's last screen, no further");
   assert(withId(T(), "search-pv-2000-0") && !withId(T(), "search-pv-2001-0"), "its last line shows");
   key("ctrl-u", 400);
   assert.equal(sv.searchView.pvTop, 1, "up to its first line");
+  // Another file under the cursor, not read yet: ^d waits (how far it goes isn't known yet).
+  sv.searchView.rows.push(S.parseRow(["other.txt", "40", "1", "x"].join("\x1f"), 3));
+  sv.searchView.cursor = 1; T();
+  const top1 = sv.searchView.pvTop;
+  key("ctrl-d");
+  assert.deepEqual([top1, sv.searchView.pvTop], [34, 34], "^d before its lines come: it stays");
+  await settle();
+  key("ctrl-d");
+  assert.equal(sv.searchView.pvTop, 44, "then it goes");
+  sv.searchView.rows.pop(); sv.searchView.cursor = 0;
   // No terminal to paste in: the copy button shows it's copying, and can't be turned off.
   const copy = withId(T(), "search-copy");
   assert.deepEqual([op(copy, "border_color"), op(copy, "cursor_pointer")], [["#ffb547"], undefined]);
@@ -2237,13 +2290,17 @@ for (const part of [
   'case $olddir in */ram-search.??????) rm -rf -- "$olddir" 2>/dev/null || { (sleep 1; rm -rf -- "$olddir") </dev/null >/dev/null 2>&1 & } ;; esac',
   'd=$(mktemp -d "${TMPDIR:-/tmp}/ram-search.XXXXXX") || exit 1', 'echo "$$"', 'echo "$d"',
   'H=; [ "$hidden" = 1 ] && H=--hidden', 'ff=; [ "$mode" = content ] && ff=$fq', 'meta=3; [ "$invert" = 1 ] && meta=2; [ -z "$q" ] && meta=0',
-  'set -- --engine "$engine" --ignore-case --column --line-number --no-heading --color=always',
+  'C=--ignore-case; [ "$cs" = 1 ] && C=--case-sensitive', 'G=; [ "$json" = 1 ] && G=--glob=!.git',
+  'set -- --engine "$engine" $C --column --line-number --no-heading --color=always',
   '--colors path:none --colors line:none --colors column:none --with-filename',
   "--field-match-separator '\\x1f' --max-columns 500 --max-columns-preview $H",
   '[ "$invert" = 1 ] && set -- "$@" --invert-match', '[ "$unique" = 1 ] && set -- "$@" --max-count 1', 'set -- "$@" -e "$q"',
-  'if [ -n "$list" ]; then xargs -0 -r rg --files --null $H -- < "$list"; else rg --files --null $H; fi |',
+  'if [ "$json" = 1 ]; then set -- --no-config --json --engine "$engine" $C $H $G',
+  '[ "$word" = 1 ] && set -- "$@" --word-regexp', '[ "$lit" = 1 ] && set -- "$@" --fixed-strings',
+  '[ "$json" = 1 ] && set -- "$@" --replace "$rep"', "if [ \"$json\" = 1 ]; then grep '^{\"type\":\"match\"'; else",
+  'if [ -n "$list" ]; then xargs -0 -r rg --files --null $H $G -- < "$list"; else rg --files --null $H $G; fi |',
   'if [ -n "$ff" ]; then fzf --filter "$ff" --read0 --print0 --no-sort; else cat; fi |',
-  'if [ -z "$q" ]; then tr "\\000" "\\n"; else xargs -0 -r rg "$@" --; fi',
+  'if [ -z "$q" ]; then LC_ALL=C tr "\\000" "\\n"; else xargs -0 -r rg "$@" --; fi',
   'elif [ -n "$list" ]; then xargs -0 -r rg "$@" -- < "$list"', 'else rg "$@"',
   'if [ "$meta" = 0 ]; then fzf --filter "$fq" --no-sort', "else fzf --filter \"$fq\" --delimiter '\\x1f' --nth 1 --no-sort; fi",
   `awk -v d="$d" -v n=${S.CHUNK} -v max=${S.MAX_ROWS} '`, 'NR > max { printf "" > (d "/more"); exit }',
@@ -2252,7 +2309,7 @@ for (const part of [
   assert(S.RUN_SH.includes(part), `the run's script has: ${part}`);
 assert.deepEqual(S.STOP_SH.split("\n"), ['if [ -n "$1" ] && [ ! -e "$2/end" ]; then kill -s TERM -- "-$1" 2>/dev/null; fi',
   'case $2 in */ram-search.??????) rm -rf -- "$2" 2>/dev/null || { (sleep 1; rm -rf -- "$2") </dev/null >/dev/null 2>&1 & } ;; esac',
-  'case $3 in */ram-search-list.??????) rm -f -- "$3" ;; esac']);
+  'case $3 in */ram-search-list.??????) rm -f -- "$3" ;; esac', 'case $4 in */ram-replace.??????) rm -rf -- "$4" ;; esac']);
 {
   // Inverted lines (no column, no matches), a tab inside a line, a file whose name
   // reads as an option.
@@ -2305,6 +2362,1291 @@ assert.deepEqual(S.STOP_SH.split("\n"), ['if [ -n "$1" ] && [ ! -e "$2/end" ]; t
   host.execHook = null;
 }
 console.log("PASS: the search window in ram-search's tab (a list, its terminal, Esc and picks close the tab, the list removed); results past a chunk, + at the cap, errors; the wheel, page keys and sizes; the preview's ^d ^u and wheel; the run's script");
+
+// ---- The search window's replace (Ctrl-R): its pure parts ----------------------------------
+{
+  // Bytes: ripgrep's JSON gives what isn't UTF-8 as base64; a match's place is in bytes.
+  assert.deepEqual(S.b64("aGVsbG8="), [...Buffer.from("hello")]);
+  assert.deepEqual(S.b64(Buffer.from([0, 255, 128, 10, 233, 1]).toString("base64")), [0, 255, 128, 10, 233, 1]);
+  for (const s of ["a", "\u00e9", "\u20ac", "\ud83d\ude00", "a\u00e9\u20ac\ud83d\ude00z"]) assert.deepEqual(S.utf8Bytes(s), [...Buffer.from(s)], `UTF-8 of ${s}`);
+  const lo = S.lossy([0x63, 0x61, 0x66, 0xe9, 0x20, 0xc3, 0xa9, 0x21]);
+  assert.deepEqual([lo.text, lo.at], ["caf\ufffd \u00e9!", [0, 1, 2, 3, 4, 5, 5, 6, 7]], "a byte that isn't UTF-8 is U+FFFD; each byte's place");
+  assert.deepEqual(S.lossy([0xed, 0xa0, 0x80, 0xc0, 0xaf, 0xf0, 0x9f, 0x98, 0x80]).text, "\ufffd\ufffd\ufffd\ufffd\ufffd\ud83d\ude00",
+    "a surrogate's or an overlong encoding's bytes aren't UTF-8; an emoji is");
+  assert.deepEqual([S.lossy([0xe0, 0x80, 0xaf]).text, S.lossy([0xf0, 0x80, 0x80, 0xaf]).text, S.lossy([0xf4, 0x90, 0x80, 0x80]).text],
+    ["\ufffd\ufffd\ufffd", "\ufffd\ufffd\ufffd\ufffd", "\ufffd\ufffd\ufffd\ufffd"], "3- and 4-byte overlong encodings, past U+10FFFF");
+  assert.deepEqual([0, 1, 3, 4, 7, 8].map(b => S.indexAt("a\u00e9\ud83d\ude00z", b)), [0, 1, 2, 4, 4, 5], "byte offsets in JavaScript's units");
+  for (const s of ["", "a", "\u00e9\u20ac", "\ud83d\ude00x", "a\u00e9\u20ac\ud83d\ude00z\n"]) assert.equal(S.utf8Length(s), Buffer.byteLength(s), `UTF-8 length of ${s}`);
+  assert.equal(S.escText("a\\b\tc\r\0\n\u00e9"), "a\\\\b\tc\r\\x00\\x0a\u00e9", "the plan: \\\\ for a backslash, \\xHH for a NUL or a line end, the rest as it is");
+  assert.equal(S.escBytes([0x63, 0xe9, 0x5c, 0x0d, 0xc3, 0xa9]), "c\\xe9\\\\\r\u00e9", "bytes that aren't UTF-8 as \\xHH");
+  // A JSON line as a row: the line as found (with its end), what to show, each match in bytes and in text.
+  const L = "\u00e9 fetchUser\r\n", s0 = Buffer.byteLength("\u00e9 ");
+  const jrow = (data) => S.parseJsonRow(JSON.stringify({ type: "match", data }));
+  let row = jrow({ path: { text: "x.ts" }, lines: { text: L }, line_number: 4, absolute_offset: 9,
+    submatches: [{ match: { text: "fetchUser" }, replacement: { text: "loadAccount" }, start: s0, end: s0 + 9 }] });
+  assert.deepEqual([row.kind, row.json, row.file, row.line, row.col, row.raw, row.text, row.bytes, row.badPath],
+    ["match", true, "x.ts", 4, s0 + 1, L, "\u00e9 fetchUser", null, false], "the column in bytes, as rg's --column");
+  assert.deepEqual(row.subs, [{ sb: s0, eb: s0 + 9, s: 2, e: 11, m: "fetchUser", mb: null, r: "loadAccount", rb: null }]);
+  const bytesRow = jrow({ path: { text: "l.txt" }, lines: { bytes: Buffer.from("caf\xe9 hello\n", "latin1").toString("base64") }, line_number: 1,
+    submatches: [{ match: { text: "hello" }, replacement: { text: "bye" }, start: 5, end: 10 }] });
+  assert.deepEqual([bytesRow.raw, bytesRow.text, bytesRow.bytes.length, bytesRow.subs[0].s, bytesRow.subs[0].e], [null, "caf\ufffd hello", 11, 5, 10]);
+  assert.equal(jrow({ path: { bytes: Buffer.from("n\xe9.txt", "latin1").toString("base64") }, lines: { text: "x\n" }, line_number: 1, submatches: [] }).badPath, true);
+  assert.equal(S.parseJsonRow("not json"), null);
+  assert.equal(jrow({ path: { text: "a" }, lines: { text: "x" } }), null, "no line number: not a row");
+  // Keep case: all capitals, a capital first, else a small letter first; the rest as typed.
+  for (const [m, r, want] of [["USER", "account", "ACCOUNT"], ["User", "account", "Account"], ["user", "Account", "account"],
+    ["User", "accountHolder", "AccountHolder"], ["user", "AccountHolder", "accountHolder"], ["U", "x", "X"], ["123", "abc", "abc"],
+    ["user", "", ""], ["_user", "_account", "_account"], ["\u00c9lan", "\u00e9t\u00e9", "\u00c9t\u00e9"], ["XMLHttp", "fetch", "Fetch"], ["U", "ab", "Ab"]])
+    assert.equal(S.keepCase(m, r), want, `keep case: ${m} -> ${r}`);
+  // The new line: each match as it becomes, the line's end kept; as bytes too.
+  const two = jrow({ path: { text: "a.ts" }, lines: { text: "let FetchUser = 1; // fetchUser\n" }, line_number: 2,
+    submatches: [{ match: { text: "FetchUser" }, replacement: { text: "loadAccount" }, start: 4, end: 13 },
+      { match: { text: "fetchUser" }, replacement: { text: "loadAccount" }, start: 22, end: 31 }] });
+  assert.equal(S.newLineText(two, false), "let loadAccount = 1; // loadAccount\n");
+  assert.equal(S.newLineText(two, true), "let LoadAccount = 1; // loadAccount\n", "keep case: each match's own");
+  assert.equal(S.newLineText(row, false), "\u00e9 loadAccount\r\n", "after a 2-byte character, the line end kept");
+  assert.deepEqual(S.newLineBytes(bytesRow, false), [...Buffer.from("caf\xe9 bye\n", "latin1")], "a line that isn't UTF-8, byte for byte");
+  assert.deepEqual(S.newLineBytes(row, false), [...Buffer.from("\u00e9 loadAccount\r\n")]);
+  const empty = jrow({ path: { text: "e" }, lines: { text: "abc\n" }, line_number: 1,
+    submatches: [{ match: { text: "" }, replacement: { text: "<>" }, start: 0, end: 0 }] });
+  assert.equal(S.newLineText(empty, false), "<>abc\n", "an empty match: the new text goes in there");
+  assert.deepEqual([S.changes(two, false), S.changes(jrow({ path: { text: "s" }, lines: { text: "same\n" }, line_number: 1,
+    submatches: [{ match: { text: "same" }, replacement: { text: "same" }, start: 0, end: 4 }] }), false)], [true, false],
+    "a match that becomes what it was changes nothing");
+  // A file's lines replaced: only the rows', each checked against the file; the rest as it was.
+  const at = (line, raw, subs) => ({ kind: "match", json: true, file: "f", line, raw, bytes: null, subs: subs.map(([m, r]) => {
+    const i = raw.indexOf(m); return { sb: Buffer.byteLength(raw.slice(0, i)), eb: Buffer.byteLength(raw.slice(0, i + m.length)), m, r }; }) });
+  const text = "one fetchUser\r\ntwo\nthree fetchUser\nfour fetchUser";
+  const rows = [at(1, "one fetchUser\r\n", [["fetchUser", "loadAccount"]]), at(4, "four fetchUser", [["fetchUser", "loadAccount"]])];
+  assert.equal(S.spliceLines(text, rows, false), "one loadAccount\r\ntwo\nthree fetchUser\nfour loadAccount",
+    "CRLF kept, the line not listed (3) left alone, no line end added to the last");
+  assert.equal(S.spliceLines(text, [rows[1], rows[0], rows[0]], false), "one loadAccount\r\ntwo\nthree fetchUser\nfour loadAccount", "in any order, each once");
+  assert.equal(S.spliceLines("one fetchUser\n" + text.slice(15), rows, false), null, "a line that reads otherwise: the file changed");
+  assert.equal(S.spliceLines("one fetchUser\r\ntwo\n", rows, false), null, "a line that's gone: the file changed");
+  assert.equal(S.spliceLines("\ufeffone fetchUser\r\n", [rows[0]], false), "\ufeffone loadAccount\r\n", "a UTF-8 BOM stays (rg doesn't count it)");
+  // REPLACE_SH's plan: a change's line number, then the line as found and the new one ("=" before
+  // each, escaped, the line end left out), in parts of PLAN_MAX bytes at most.
+  assert.deepEqual(S.planParts([rows[0], { ...bytesRow, line: 2 }], false), ["1\n=one fetchUser\r\n=one loadAccount\r\n2\n=caf\\xe9 hello\n=caf\\xe9 bye\n"],
+    "bytes escaped, line ends left out");
+  // A long line goes on several plan lines ("+" before each piece that goes on), and a change can
+  // go on in the next part: read back, every change is whole and in order.
+  const unplan = parts => {
+    const out = [];
+    let k = 0, cur = null, v = "";
+    for (const x of parts.join("").split("\n").slice(0, -1)) {
+      if (k === 0) { cur = { line: Number(x) }; k = 1; v = ""; continue; }
+      assert(x[0] === "+" || x[0] === "=", `a piece starts with + or =: ${x.slice(0, 10)}`);
+      v += x.slice(1);
+      if (x[0] === "+") continue;
+      if (k === 1) { cur.was = v; v = ""; k = 2; } else { cur.now = v; out.push(cur); k = 0; }
+    }
+    assert.equal(k, 0, "the plan ends with a whole change");
+    return out;
+  };
+  const long = (n, x = "x") => at(n, (x.length > 1 ? "a" : "") + x.repeat(200 * 1024) + " fetchUser\n", [["fetchUser", "y"]]);
+  const parts = S.planParts([long(1), long(2), long(3, "\u00e9"), long(4, "\ud83d\ude00")], false);
+  assert(parts.length > 1 && parts.every(p => Buffer.byteLength(p) <= S.PLAN_MAX), "parts that writeTextFile takes");
+  assert(parts.every(p => p === Buffer.from(p).toString()), "never half a character at a piece's edge");
+  assert.deepEqual(unplan(parts).map(c => [c.line, c.was.length, c.now]), [[1, 204810, "x".repeat(204800) + " y"], [2, 204810, "x".repeat(204800) + " y"],
+    [3, 204810, "\u00e9".repeat(204800) + " y"], [4, 409611, "a" + "\ud83d\ude00".repeat(204800) + " y"]], "each change whole, in order");
+  const huge = S.planParts([at(7, "z".repeat(3 << 20) + " fetchUser\n", [["fetchUser", "y"]])], false);
+  assert.deepEqual([huge.length > 3, unplan(huge)[0].now === "z".repeat(3 << 20) + " y"], [true, true], "a 3 MiB line too");
+  // What the list and preview draw: the matches, struck out and new; the preview's runs.
+  assert.deepEqual(S.hitRanges("a \x1b[0m\x1b[1m\x1b[31mhel\x1b[0m lo \x1b[0m\x1b[1m\x1b[31mx\x1b[0m"), [{ s: 2, e: 5 }, { s: 9, e: 10 }]);
+  assert.deepEqual(S.replaceRuns(two, false), [{ text: "let ", mark: "" }, { text: "FetchUser", mark: "old" }, { text: "loadAccount", mark: "new" },
+    { text: " = 1; // ", mark: "" }, { text: "fetchUser", mark: "old" }, { text: "loadAccount", mark: "new" }]);
+  assert.deepEqual(S.replaceRuns(empty, false), [{ text: "<>", mark: "new" }, { text: "abc", mark: "" }]);
+  assert.deepEqual(S.replaceRuns(jrow({ path: { text: "s" }, lines: { text: "a same\n" }, line_number: 1,
+    submatches: [{ match: { text: "same" }, replacement: { text: "same" }, start: 2, end: 6 }] }), false),
+    [{ text: "a ", mark: "" }, { text: "same", mark: "hit" }], "a match that stays the same is only lit");
+  assert.deepEqual(S.viewRuns([{ text: "\t  a\tb", mark: "" }, { text: "c", mark: "old" }]), [{ text: "a   b", mark: "" }, { text: "c", mark: "old" }],
+    "the indent dropped, tabs to 4");
+  const bat = [{ text: "let x = ", fg: "#111111" }, { text: "fetchUser(id);", fg: "#222222" }], hit = [{ s: 8, e: 17, r: "loadAccount" }];
+  assert.deepEqual(S.markRuns(bat, hit, "old"), [{ text: "let x = ", fg: "#111111" }, { text: "fetchUser", fg: "#222222", hit: "old" },
+    { text: "(id);", fg: "#222222" }]);
+  assert.deepEqual(S.swapRuns(bat, hit), [{ text: "let x = ", fg: "#111111" }, { text: "loadAccount", hit: "new" }, { text: "(id);", fg: "#222222" }]);
+  assert.deepEqual(S.swapRuns([{ text: "abc" }], [{ s: 3, e: 3, r: "!" }]), [{ text: "abc" }, { text: "!", hit: "new" }], "at the line's end too");
+  assert.deepEqual(S.expandTabs([{ text: "\ta" }, { text: "\tb", fg: "#1" }]), [{ text: "    a" }, { text: "   b", fg: "#1" }], "tab stops of 4, across runs");
+  assert.deepEqual(S.wrapRuns([{ text: "abcdefghij" }], 4, 3).map(r => r.map(x => x.text).join("")), ["abcd", "efg", "hij"]);
+  assert.deepEqual(S.cutRuns([{ text: "abcdefghij" }], 4, false).map(r => r.map(x => x.text).join("")), ["abcd"]);
+  // The scripts' parts that make a replace safe.
+  for (const part of ['while [ -L "$t" ]; do', '[ "$(tr -d "\\000" < "$t" | wc -c)" -eq "$(wc -c < "$t")" ] || exit 4',
+    'export LC_ALL=C', 'sum=$(cksum < "$t")', '[ "$(cksum < "$t")" = "$sum" ] || { rm -f -- "$tmp" "$keep"; exit 3; }',
+    'if [ -s "$t" ] && [ -z "$(tail -c 1 -- "$t")" ]; then printf "\\n" >> "$tmp"; fi', '[ -n "$mode" ] && chmod "$mode" "$tmp"',
+    'cp -p -- "$t" "$keep"', 'mv -f -- "$tmp" "$t"', 'NR in was { if (line != was[NR]) { bad = 3; exit } line = now[NR]; done++ }',
+    'END { if (bad) exit bad; if (done != want) exit 3; if (NR) printf "%s", prev }', "' < \"$t\" > \"$tmp\"",
+    'if (k == 1) { was[at] = dec(v); k = 2; v = "" } else { now[at] = dec(v); want++; k = 0 }', '  if (k != 0) { bad = 2; exit }'])
+    assert(S.REPLACE_SH.includes(part), `the replace's script has: ${part}`);
+  for (const part of ['[ "$(cksum < "$t")" = "$sum" ] || exit 3', 'cp -- "$keep" "$tmp"', 'mv -f -- "$tmp" "$t"', 'rm -f -- "$keep"'])
+    assert(S.UNDO_SH.includes(part), `undo's script has: ${part}`);
+  assert.equal(S.RDIR_SH, 'mktemp -d "${TMPDIR:-/tmp}/ram-replace.XXXXXX"');
+}
+
+// ---- The search window's replace: the window ----------------------------------------------
+{
+  const DIR = n => `/tmp/T/ram-search.X${String(n).padStart(5, "0")}`, RD = "/tmp/T/ram-replace.Qq1234";
+  const runs = [], stops = [], helpers = [], rgJson = [], rdirs = [];
+  let replaceOut = { code: 0, stdout: "1234 99\n", stderr: "" }, undoOut = { code: 0, stdout: "", stderr: "" };
+  host.execHook = (command, args, opts) => {
+    if (command === "sh" && args[1] === S.RUN_SH) { const n = runs.push({ args: args.slice(3), opts }); return { code: 0, stdout: `${8000 + n}\n${DIR(n)}\n`, stderr: "" }; }
+    if (command === "sh" && args[1] === S.STOP_SH) { stops.push(args.slice(3)); return { code: 0, stdout: "", stderr: "" }; }
+    if (command === "sh" && args[1] === S.RDIR_SH) { rdirs.push(1); return { code: 0, stdout: RD + "\n", stderr: "" }; }
+    if (command === "sh" && args[1] === S.REPLACE_SH) { helpers.push(["replace", ...args.slice(3)]); return replaceOut; }
+    if (command === "sh" && args[1] === S.UNDO_SH) { helpers.push(["undo", ...args.slice(3)]); return undoOut; }
+    if (command === "env" && args[1] === "bat") return host.batWait ?? { code: 0, stdout: host.batOut ?? "", stderr: "" };
+    if (command === "rg" && args[0] === "--json") { rgJson.push(args); return { code: 0, stdout: "", stderr: "" }; }
+    return null;
+  };
+  const filesBefore = host.files;
+  host.files = {};
+  host.shared.delete(S.SEARCH_LAST);
+  const p = { role: "search", at: 777, space: "s0", name: "api", machine: null, overlay: "o20",
+    target: { pane: "shell-pane", terminal: "shell" }, folder: "/repo/api/src", repo: "/repo/api" };
+  host.shared.set(S.SEARCH_TOP, 777);
+  let sv = view(p); await settle();
+  const V = () => sv.searchView, T = () => R(sv, p);
+  const k = (ks, extra = {}) => { withId(T(), "ram-search").handlers.on_key_down({ key: ks.split("-").pop(), keystroke: ks, modifiers: {}, ...extra }, cx); };
+  const alt = ks => k(ks, { modifiers: { alt: true } });
+  const type = async s => { for (const ch of s) k(ch, { key_char: ch }); await settle(); };
+  const last = () => runs.at(-1).args;
+  const poll = async () => { await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle(); };
+  const noteText = () => textOf(withId(T(), "search-note")).join("");
+  // rg's JSON for a line: each match [what it matched, what it becomes], found in order.
+  const jm = (path, line, text, subs) => {
+    let from = 0;
+    return JSON.stringify({ type: "match", data: { path: { text: path }, lines: { text }, line_number: line, absolute_offset: 0,
+      submatches: subs.map(([m, r]) => {
+        const i = text.indexOf(m, from);
+        from = i + m.length;
+        return { match: { text: m }, replacement: { text: r }, start: Buffer.byteLength(text.slice(0, i)), end: Buffer.byteLength(text.slice(0, i + m.length)) };
+      }) } });
+  };
+  // The newest run's lines arrive, and it ends.
+  const feed = async lines => { const d = DIR(runs.length); host.files[`${d}/000000`] = lines.join("\n") + "\n"; host.files[`${d}/end`] = ""; await poll(); };
+  const A = "src/a.ts", A1 = "const u = fetchUser(id);\n", A2 = "let FetchUser = 1; // fetchUser\n", A3 = "\tfetchUsers();\n";
+  const E = "\u00e9.ts", E1 = "// \u00e9 fetchUser\n";
+  const AF = "/repo/api/src/a.ts", EF = "/repo/api/\u00e9.ts";
+  host.batOut = A1 + A2 + A3;
+  const reset = () => { host.files[AF] = A1 + A2 + A3; host.files[EF] = E1; };
+  const found = () => [jm(A, 1, A1, [["fetchUser", "loadAccount"]]), jm(A, 2, A2, [["FetchUser", "loadAccount"], ["fetchUser", "loadAccount"]]),
+    jm(E, 1, E1, [["fetchUser", "loadAccount"]])];
+  reset();
+  await type("fetchUser");
+  assert.deepEqual([last().slice(2, 4), last().slice(11)], [["content", "fetchUser"], ["", "", "", "", ""]], "a plain search first");
+  // The preview lights what matched, where the list's row says it did.
+  await feed([[A, 1, 11, "const u = \x1b[0m\x1b[1m\x1b[31mfetchUser\x1b[0m(id);"].join("\x1f")]);
+  T(); await settle();
+  assert.deepEqual(textOf(withId(T(), "search-pv-1-0")), ["1", "const u = ", "fetchUser", "(id);"]);
+  assert(flatten(withId(T(), "search-pv-1-0")).some(n => n.kids.includes("fetchUser") && op(n, "bg")?.[0] === "#ffb5474d"), "the match lit");
+  assert(!withId(T(), "search-pv-1-new-0"), "once: not a replace");
+  // Ctrl-R: the replace row, its field typing; the search runs as a replace (ripgrep's JSON, the new text).
+  k("ctrl-r", { modifiers: { control: true } }); await settle();
+  assert.equal(V().focus, "replace");
+  let tree = T();
+  assert(withId(tree, "search-replace-row") && withId(tree, "search-rfield"), "the replace row, under the query");
+  assert.deepEqual(flatten(withId(tree, "ram-search")).filter(n => ["search-query", "search-replace-row", "search-flags"].includes(idOf(n))).map(idOf),
+    ["search-query", "search-replace-row", "search-flags"]);
+  assert.deepEqual([op(withId(tree, "search-replace"), "border_color")[0], op(withId(tree, "search-query"), "border_color")[0]], ["#ffb547", colors.input],
+    "the field that types has the amber border");
+  assert.deepEqual(last().slice(14), ["1", ""], "a replace's run, nothing to put yet (it deletes)");
+  await type("loadAccount");
+  assert.deepEqual([V().st.rep, V().st.q, last().slice(14)], ["loadAccount", "fetchUser", ["1", "loadAccount"]], "the new text; the query as it was");
+  await feed(found());
+  withId(T(), "search-list").handlers.on_size_change({ width: 1400, height: 600 }, cx);
+  assert.deepEqual(V().rows.map(r => [r.file, r.line, r.col, r.subs.length]), [[A, 1, 11, 1], [A, 2, 5, 2], [E, 1, 7, 1]],
+    "rows from ripgrep's JSON, columns in bytes as rg's");
+  tree = T();
+  assert.equal(textOf(withId(tree, "search-count")).join(""), "4 matches in 2 files");
+  assert.equal(textOf(withId(tree, "search-head"))[0], "SEARCH & REPLACE");
+  let r0 = withId(tree, "search-row-0");
+  assert.deepEqual(textOf(r0), ["src/", "a.ts", ":1:11", "const u = ", "fetchUser", "loadAccount", "(id);"]);
+  const oldEl = flatten(r0).find(n => n.kids.includes("fetchUser")), newEl = flatten(r0).find(n => n.kids.includes("loadAccount"));
+  assert.deepEqual([op(oldEl, "text_color")[0], Boolean(op(oldEl, "line_through")), op(newEl, "text_color")[0], Boolean(op(newEl, "line_through"))],
+    ["#ff5f6d", true, "#7dff9b", false], "struck out in red, the new text after it in green");
+  // Alt-K: each match in its case (FetchUser's becomes LoadAccount), at once: no new search.
+  const nRuns = runs.length;
+  alt("alt-k");
+  assert.deepEqual(textOf(withId(T(), "search-row-1")).slice(3), ["let ", "FetchUser", "LoadAccount", " = 1; // ", "fetchUser", "loadAccount"]);
+  assert.deepEqual([runs.length, op(withId(T(), "search-keep"), "border_color")[0]], [nRuns, "#ffb547"], "no new search; its button lit");
+  T(); await settle();
+  assert.deepEqual(textOf(withId(T(), "search-pv-2-new-0")), ["+", "let ", "LoadAccount", " = 1; // ", "loadAccount"], "the preview too");
+  alt("alt-k");
+  // The preview: each line found shows twice, struck out (red), then as it will be (+, green).
+  T(); await settle(); tree = T();
+  const pOld = withId(tree, "search-pv-1-0"), pNew = withId(tree, "search-pv-1-new-0");
+  assert(pOld && pNew, "line 1 as it is, and as it will be");
+  assert.deepEqual([textOf(pOld), textOf(pNew)], [["1", "const u = ", "fetchUser", "(id);"], ["+", "const u = ", "loadAccount", "(id);"]]);
+  assert(flatten(pOld).some(n => n.kids.includes("fetchUser") && op(n, "line_through") && op(n, "text_color")[0] === "#ff5f6d"), "struck out, red");
+  assert(flatten(pNew).some(n => n.kids.includes("loadAccount") && op(n, "text_color")[0] === "#7dff9b"), "the new text green");
+  assert.deepEqual([op(pOld, "bg")[0].slice(0, 7), op(pNew, "bg")[0].slice(0, 7)], ["#ff5f6d", "#7dff9b"], "their lines tinted red, then green");
+  assert.deepEqual(textOf(withId(tree, "search-pv-2-new-0")), ["+", "let ", "loadAccount", " = 1; // ", "loadAccount"], "both of line 2's");
+  assert(withId(tree, "search-pv-3-0") && !withId(tree, "search-pv-3-new-0"), "a line the list doesn't have shows once");
+  assert.deepEqual(textOf(withId(tree, "search-pv-3-0")), ["3", "    fetchUsers();"], "a tab to the next stop of 4");
+  // Alt-V and Alt-U are off while replacing (their buttons too).
+  alt("alt-v");
+  assert.deepEqual([V().st.invert, /Off while replacing/.test(noteText())], [false, true]);
+  assert.deepEqual([op(withId(T(), "search-invert"), "cursor_pointer"), op(withId(T(), "search-unique"), "cursor_pointer")], [undefined, undefined]);
+  // Alt-R in a repo: the cursor's line, at once, through writeTextFile with the file as read
+  // (one that changed meanwhile is refused); the old rows go, it searches again.
+  host.writes = [];
+  let before = runs.length;
+  alt("alt-r"); await settle();
+  assert.deepEqual(host.writes.map(w => w.path), [AF]);
+  assert.equal(host.files[AF], "const u = loadAccount(id);\n" + A2 + A3, "only that line; the rest as it was");
+  assert.deepEqual([runs.length, V().rows.length, noteText()], [before + 1, 0, "Replaced 1 match in 1 file"], "the list goes, the search runs again");
+  // Alt-Z: back as it was (only while it's still what the replace wrote).
+  host.writes = [];
+  alt("alt-z"); await settle();
+  assert.deepEqual([host.writes.map(w => w.path), host.files[AF], noteText()], [[AF], A1 + A2 + A3, "Put back 1 file"]);
+  alt("alt-z");
+  assert.equal(noteText(), "Nothing to undo");
+  // Alt-A: every line listed, after a question; Esc (the window's own key) says no and the window stays.
+  await feed(found());
+  host.writes = []; host.closed = [];
+  alt("alt-a");
+  tree = T();
+  assert.equal(textOf(withId(tree, "search-ask")).join(""), "Replace 4 matches in 2 files?");
+  assert.deepEqual([textOf(withId(tree, "search-yes")), textOf(withId(tree, "search-no"))], [["Enter", "yes"], ["Esc", "no"]]);
+  assert(!withId(tree, "search-files"), "the question takes the foot's place");
+  k("ctrl-a", { modifiers: { control: true } });
+  withId(T(), "ram-search").handlers["on_action:ram_search.next"]({}, cx);
+  assert.deepEqual([V().picked.size, V().cursor, Boolean(V().ask)], [0, 0, true], "other keys do nothing meanwhile");
+  withId(T(), "ram-search").handlers["on_action:ram_search.escape"]({}, cx);
+  assert.deepEqual([V().ask, host.writes.length, host.closed.length], [null, 0, 0], "Esc: no, and nothing written");
+  alt("alt-a");
+  click(T(), "search-keep");
+  assert.deepEqual([V().ask, host.writes.length, V().st.keep], [null, 0, true], "a click on another button lets the question go");
+  click(T(), "search-keep");
+  // So does a click on a row, its pick box or a field, or the query's ✕ (the question was about
+  // what was picked when it asked).
+  for (const [what, go] of [["a row", () => withId(T(), "search-row-1").handlers.on_click({}, cx)], ["a pick box", () => click(T(), "search-pick-1")],
+    ["the query", () => withId(T(), "search-field").handlers["on_mouse_down:left"]({ local_position: { x: 0 } }, cx)],
+    ["the new text", () => withId(T(), "search-rfield").handlers["on_mouse_down:left"]({ local_position: { x: 0 } }, cx)],
+    ["the query's \u2715", () => click(T(), "search-clear")]]) {
+    alt("alt-a");
+    assert(V().ask, what);
+    go();
+    assert.equal(V().ask, null, what);
+  }
+  assert.deepEqual([V().cursor, V().picked.size, V().st.q, host.writes.length], [1, 1, "", 0], "each did what it does");
+  V().picked.clear(); V().cursor = 0;
+  await type("fetchUser"); await feed(found());
+  alt("alt-a"); k("enter"); await settle();
+  assert.deepEqual(host.writes.map(w => w.path).sort(), [AF, EF].sort());
+  assert.deepEqual([host.files[AF], host.files[EF]], ["const u = loadAccount(id);\nlet loadAccount = 1; // loadAccount\n" + A3, "// \u00e9 loadAccount\n"],
+    "each line listed; a line that wasn't (3) as it was");
+  assert.equal(noteText(), "Replaced 4 matches in 2 files");
+  alt("alt-z"); await settle();
+  assert.deepEqual([host.files[AF], host.files[EF], noteText()], [A1 + A2 + A3, E1, "Put back 2 files"]);
+  // A file that changed since the search is left alone, and said so; the rest goes ahead.
+  await feed(found());
+  host.files[AF] = "// new first line\n" + A1 + A2 + A3;
+  alt("alt-a"); k("enter"); await settle();
+  assert.deepEqual([host.files[AF], host.files[EF]], ["// new first line\n" + A1 + A2 + A3, "// \u00e9 loadAccount\n"]);
+  assert.equal(noteText(), "Replaced 1 match in 1 file \u00b7 skipped 1: src/a.ts (it changed since the search)");
+  assert.equal(op(flatten(withId(T(), "search-note")).find(n => n.kids.length && typeof n.kids[0] === "string"), "text_color")[0], "#ffb547", "amber: not all of it");
+  // Undo leaves a file that changed since the replace as it is.
+  host.files[EF] = "// edited again\n";
+  alt("alt-z"); await settle();
+  assert.deepEqual([host.files[EF], noteText()], ["// edited again\n", "Left 1 as it is: \u00e9.ts (it changed since the replace)"]);
+  assert.equal(op(flatten(withId(T(), "search-note")).find(n => n.kids.length && typeof n.kids[0] === "string"), "text_color")[0], "#ff5f6d", "red: none of it");
+  reset();
+  // After a replace (and an undo) the preview reads the file again; a read on its way meanwhile
+  // brings the file as it was, so it's dropped too.
+  await feed(found());
+  V().cursor = 0;
+  V().pv.clear();   // (nothing read yet)
+  let release;
+  host.batWait = new Promise(r => { release = r; });
+  T(); await settle();
+  alt("alt-r"); await settle();
+  assert.equal(host.files[AF], "const u = loadAccount(id);\n" + A2 + A3);
+  host.batWait = null;
+  host.batOut = host.files[AF];
+  release({ code: 0, stdout: A1 + A2 + A3, stderr: "" }); await settle();
+  await feed([jm(A, 2, A2, [["FetchUser", "loadAccount"], ["fetchUser", "loadAccount"]])]);
+  T(); await settle();
+  assert.deepEqual(textOf(withId(T(), "search-pv-1-0")), ["1", "const u = loadAccount(id);"], "the file as it is now");
+  host.batOut = A1 + A2 + A3;
+  alt("alt-z"); await settle();
+  await feed(found());
+  T(); await settle();
+  assert.deepEqual([textOf(withId(T(), "search-pv-1-0")), textOf(withId(T(), "search-pv-1-new-0"))],
+    [["1", "const u = ", "fetchUser", "(id);"], ["+", "const u = ", "loadAccount", "(id);"]], "and after the undo");
+  // A file writeTextFile can't read (here: not there for the stand-in; for Herdr over 1 MiB, or not
+  // UTF-8) goes through REPLACE_SH: its plan in the replace's own folder, a copy kept for undo.
+  await feed(found());
+  delete host.files[EF];
+  helpers.length = 0; host.writes = [];
+  V().cursor = 2;
+  alt("alt-r"); await settle();
+  assert.equal(rdirs.length, 1, "the replace's folder, made once");
+  assert.deepEqual(host.writes.map(w => [w.path, w.text]), [[`${RD}/plan-1.0`, "1\n=// \u00e9 fetchUser\n=// \u00e9 loadAccount\n"]]);
+  assert.deepEqual(helpers, [["replace", EF, `${RD}/kept-1`, `${RD}/plan-1`, "1"]]);
+  assert.equal(noteText(), "Replaced 1 match in 1 file");
+  alt("alt-z"); await settle();
+  assert.deepEqual(helpers.at(-1), ["undo", EF, `${RD}/kept-1`, "1234 99"], "undo puts the copy back while the file is what the replace left");
+  await feed(found());
+  for (const [code, why] of [[3, "it changed since the search"], [4, "it isn't text"], [2, "can't write in its folder"]]) {
+    replaceOut = { code, stdout: "", stderr: code === 2 ? "can't write in its folder\n" : "" };
+    V().cursor = 2;
+    alt("alt-r"); await settle();
+    assert.equal(noteText(), `Skipped 1: \u00e9.ts (${why})`, `exit ${code}`);
+    await feed(found());
+  }
+  assert.equal(rdirs.length, 1, "one folder for all of them");
+  replaceOut = { code: 0, stdout: "1234 99\n", stderr: "" };
+  // Nothing to change: the script isn't run.
+  const nHelpers = helpers.length;
+  k("x", { key_char: "x" }); k("backspace"); await settle();
+  await feed([jm(E, 1, E1, [["fetchUser", "fetchUser"]])]);
+  alt("alt-r"); await settle();
+  assert.deepEqual([helpers.length, noteText()], [nHelpers, "Nothing changed"]);
+  // Gone since the search (Herdr's readTextFile gives null): said so, the script isn't run.
+  host.files[EF] = null;
+  await feed(found());
+  V().cursor = 2;
+  alt("alt-r"); await settle();
+  assert.deepEqual([helpers.length, noteText()], [nHelpers, "Skipped 1: \u00e9.ts (it's gone)"]);
+  delete host.files[EF];
+  await feed(found());
+  undoOut = { code: 3, stdout: "", stderr: "" };
+  V().cursor = 2;
+  alt("alt-r"); await settle(); alt("alt-z"); await settle();
+  assert.equal(noteText(), "Left 1 as it is: \u00e9.ts (it changed since the replace)");
+  undoOut = { code: 0, stdout: "", stderr: "" };
+  reset();
+  // Never inside .git (a file given to ram-search, say), nor a name that isn't UTF-8, nor a file with a NUL.
+  await feed([jm(".git/config", 1, "x fetchUser\n", [["fetchUser", "y"]])]);
+  host.writes = [];
+  alt("alt-r"); await settle();
+  assert.deepEqual([host.writes.length, noteText()], [0, "Skipped 1: .git/config (it's in .git)"]);
+  await feed([JSON.stringify({ type: "match", data: { path: { bytes: Buffer.from("n\xe9.ts", "latin1").toString("base64") }, lines: { text: "x fetchUser\n" },
+    line_number: 1, submatches: [{ match: { text: "fetchUser" }, replacement: { text: "y" }, start: 2, end: 11 }] } })]);
+  alt("alt-r"); await settle();
+  assert.deepEqual([host.writes.length, noteText()], [0, "Skipped 1: n\ufffd.ts (its name isn't UTF-8)"]);
+  host.files["/repo/api/nul.ts"] = "x fetchUser\0\n";
+  await feed([jm("nul.ts", 1, "x fetchUser\0\n", [["fetchUser", "y"]])]);
+  alt("alt-r"); await settle();
+  assert.deepEqual([host.writes.length, noteText(), host.files["/repo/api/nul.ts"]], [0, "Skipped 1: nul.ts (it isn't text)", "x fetchUser\0\n"]);
+  // A ripgrep that doesn't say what a match becomes (before 14): nothing written, and it says why.
+  await feed([JSON.stringify({ type: "match", data: { path: { text: A }, lines: { text: A1 }, line_number: 1,
+    submatches: [{ match: { text: "fetchUser" }, start: 10, end: 19 }] } })]);
+  alt("alt-r"); await settle();
+  assert.deepEqual([host.writes.length, noteText()], [0, "This ripgrep doesn't say what each match becomes: replace needs ripgrep 14 or newer"]);
+  assert.deepEqual(textOf(withId(T(), "search-row-0")).slice(3), ["const u = ", "fetchUser", "(id);"], "lit, not struck out");
+  // A match that becomes what it was: lit, once, in the list and the preview; nothing to write.
+  k("x", { key_char: "x" }); k("backspace"); await settle();
+  await feed([jm(A, 1, A1, [["fetchUser", "fetchUser"]])]);
+  T(); await settle(); tree = T();
+  assert(withId(tree, "search-pv-1-0") && !withId(tree, "search-pv-1-new-0"), "the preview shows it once");
+  assert(flatten(withId(tree, "search-pv-1-0")).some(n => n.kids.includes("fetchUser") && op(n, "bg")?.[0] === "#ffb5474d"), "lit amber");
+  alt("alt-r"); await settle();
+  assert.deepEqual([host.writes.length, noteText()], [0, "Nothing changed"]);
+  await feed(found());
+  // Picks: Alt-R replaces the picked lines only.
+  V().cursor = 0; k("tab"); V().cursor = 2; k("tab");
+  host.writes = [];
+  alt("alt-r"); await settle();
+  assert.deepEqual([host.files[AF], host.files[EF]], ["const u = loadAccount(id);\n" + A2 + A3, "// \u00e9 loadAccount\n"], "lines 1 of each, not line 2");
+  assert.equal(V().picked.size, 0, "the picks go with the rows");
+  // Undo goes back one replace at a time, the newest first.
+  alt("alt-z"); await settle();
+  assert.deepEqual([host.files[AF], host.files[EF]], [A1 + A2 + A3, E1], "(the picks' replace undone)");
+  await feed(found());
+  V().cursor = 0; alt("alt-r"); await settle();
+  await feed(found());
+  V().cursor = 2; alt("alt-r"); await settle();
+  assert.deepEqual([host.files[AF], host.files[EF]], ["const u = loadAccount(id);\n" + A2 + A3, "// \u00e9 loadAccount\n"], "two replaces");
+  alt("alt-z"); await settle();
+  assert.deepEqual([host.files[AF], host.files[EF]], ["const u = loadAccount(id);\n" + A2 + A3, E1], "undo: the newest replace only");
+  alt("alt-z"); await settle();
+  assert.deepEqual([host.files[AF], host.files[EF]], [A1 + A2 + A3, E1], "then the one before it");
+  // Undo keeps UNDO_STEPS replaces and UNDO_MAX characters at most, dropping the oldest.
+  const undosBefore = V().undos;
+  V().undos = [];
+  for (let i = 0; i < S.UNDO_STEPS + 5; i++) V().keepUndo([{ kind: "text", file: `/f${i}`, before: "a", after: "b" }]);
+  assert.deepEqual([V().undos.length, V().undos[0].files[0].file], [S.UNDO_STEPS, "/f5"], "the oldest go first");
+  V().keepUndo([{ kind: "text", file: "/huge", before: "x".repeat(S.UNDO_MAX / 2 + 1), after: "y".repeat(S.UNDO_MAX / 2) }]);
+  assert.deepEqual(V().undos.map(u => u.files[0].file), ["/huge"], "too much text: only the newest is kept");
+  V().undos = undosBefore;
+  reset();
+  // A file that would grow past what writeTextFile takes goes through REPLACE_SH instead.
+  const G1 = "x".repeat(1048000) + " fetchUser\n";
+  host.files["/repo/api/grow.ts"] = G1;
+  await feed([jm("grow.ts", 1, G1, [["fetchUser", "y".repeat(1000)]])]);
+  helpers.length = 0; host.writes = [];
+  alt("alt-r"); await settle();
+  assert.deepEqual([helpers.map(h => h.slice(0, 2)), host.files["/repo/api/grow.ts"] === G1],
+    [[["replace", "/repo/api/grow.ts"]], true], "over 1 MiB once replaced: the script");
+  delete host.files["/repo/api/grow.ts"];
+  // Not while a newer search is on its way (what's shown would be old), nor before typing what to find.
+  await feed(found());
+  k("x", { key_char: "x" }); await settle();
+  host.writes = [];
+  alt("alt-r"); await settle();
+  assert.deepEqual([host.writes.length, noteText()], [0, "Still searching: a moment"]);
+  k("backspace"); await settle();
+  await feed(found());
+  // Replace all waits for every line, and refuses a list that stopped at the cap.
+  await type("Q"); host.files[`${DIR(runs.length)}/000000`] = found()[0] + "\n"; await poll();
+  alt("alt-a");
+  assert.equal(noteText(), "Still searching: replace all waits for every line");
+  host.files[`${DIR(runs.length)}/more`] = ""; host.files[`${DIR(runs.length)}/end`] = ""; await poll();
+  alt("alt-a");
+  assert.equal(noteText(), `Over ${S.MAX_ROWS.toLocaleString("en-US")} lines: narrow the search to replace them all`);
+  assert.equal(V().ask, null);
+  k("backspace"); await settle(); await feed(found());
+  // Options: Alt-M match case, Alt-B whole words, Alt-L literal, each a button; the run gets them.
+  alt("alt-m"); alt("alt-b"); alt("alt-l"); await settle();
+  assert.deepEqual(last().slice(11, 14), ["1", "1", "1"]);
+  tree = T();
+  for (const id of ["search-case", "search-word", "search-literal"]) assert.deepEqual(op(withId(tree, id), "border_color"), ["#ffb547"], `${id} lit`);
+  assert(textOf(withId(tree, "search-mode")).includes("Content (literal)"), "the mode says literal");
+  for (const id of ["search-case", "search-word", "search-literal"]) click(T(), id);
+  await settle();
+  assert.deepEqual(last().slice(11, 14), ["", "", ""], "their buttons turn them off again");
+  // The replace row's keys are its buttons, in words; nothing in the window is a symbol.
+  await feed(found());
+  tree = T();
+  for (const [id, action] of [["search-keep", "keep"], ["search-apply", "apply"], ["search-applyall", "applyall"], ["search-undo", "undo"],
+    ["search-replace-field", "torep"], ["search-find", "tofind"], ["search-replace-on", "replace"]]) {
+    assert(withId(tree, id), `${action}: a button`);
+    assert.match(op(withId(tree, id), "tooltip")[0], new RegExp(`  ${S.keyText(S.KEYS.find(x => x[1] === action)[0])}$`), `${id}'s tooltip ends with its key`);
+  }
+  assert.deepEqual(["search-keep", "search-apply", "search-applyall", "search-undo", "search-replace-on", "search-find", "search-replace-field"]
+    .map(id => textOf(withId(tree, id)).slice(0, 2)),
+    [["Alt-K", "keep case"], ["Alt-R", "replace"], ["Alt-A", "replace all"], ["Alt-Z", "undo"], ["Ctrl-R", "replace"], ["Alt-Up", "find"],
+      ["Alt-Down", "replace with"]]);
+  assert.equal(op(withId(tree, "search-replace-on"), "tooltip")[0], "Replace: show or hide the row for the new text  Ctrl-R");
+  alt("alt-a");
+  const tips = t2 => flatten(t2).flatMap(n => n.ops.filter(o => o[0] === "tooltip").map(o => o[1]));
+  for (const x of [...textOf(T()), ...tips(T())]) assert(!/[\u2325\u21e5\u21e7\u23ce\u2318\u232b]|\^[a-z]/.test(x), `in words: ${x}`);
+  k("escape");
+  assert.equal(V().ask, null, "Esc as a key says no too");
+  // Alt-Up and Alt-Down (the fields' buttons too, and a click in a field): which field types,
+  // the amber border on it.
+  const borders = () => [op(withId(T(), "search-query"), "border_color")[0], op(withId(T(), "search-replace"), "border_color")[0]];
+  alt("alt-up");
+  assert.deepEqual([V().focus, borders(), op(withId(T(), "search-find"), "border_color")[0]], ["query", ["#ffb547", colors.input], "#ffb547"]);
+  k("z", { key_char: "z" }); await settle();
+  assert.deepEqual([V().st.q, V().st.rep, last()[3]], ["fetchUserz", "loadAccount", "fetchUserz"], "the query types now");
+  k("backspace"); await settle();
+  alt("alt-down");
+  assert.deepEqual([V().focus, borders(), op(withId(T(), "search-find"), "border_color")[0]], ["replace", [colors.input, "#ffb547"], colors.input]);
+  k("end"); k("Z", { key_char: "Z" }); await settle();
+  assert.deepEqual([V().st.q, V().st.rep, last().slice(14)], ["fetchUser", "loadAccountZ", ["1", "loadAccountZ"]], "the new text types");
+  k("backspace"); await settle();
+  click(T(), "search-find");
+  assert.equal(V().focus, "query", "its button too");
+  click(T(), "search-replace-field");
+  assert.equal(V().focus, "replace", "and the other's");
+  alt("alt-up");
+  withId(T(), "search-rfield").handlers["on_mouse_down:left"]({ local_position: { x: 4.2 * 12 * 1.25 * 0.6 } }, cx);
+  assert.deepEqual([V().focus, V().rat], ["replace", 4], "a click in the new text's field: it types there, at the click");
+  withId(T(), "search-field").handlers["on_mouse_down:left"]({ local_position: { x: 2.2 * 12 * 1.25 * 0.6 } }, cx);
+  assert.deepEqual([V().focus, V().at], ["query", 2], "and in the query's");
+  alt("alt-down");
+  // Ctrl-R again: replace off. At once the list shows the rows as a search does (the matches lit,
+  // nothing struck out), the head says SEARCH, the count counts lines and the preview shows each
+  // line once; a plain search runs, and the new text is kept for the next Ctrl-R.
+  await feed(found());
+  V().cursor = 0;
+  T(); await settle();
+  assert(withId(T(), "search-pv-1-new-0"), "(replacing: line 1 twice)");
+  const nOff = runs.length;
+  k("ctrl-r", { modifiers: { control: true } });
+  tree = T();
+  assert.deepEqual([V().st.replacing, V().focus, V().st.rep, runs.length, last().slice(14)], [false, "query", "loadAccount", nOff + 1, ["", ""]]);
+  assert.deepEqual([Boolean(withId(tree, "search-replace-row")), Boolean(withId(tree, "search-find")), textOf(withId(tree, "search-head"))[0],
+    textOf(withId(tree, "search-count")).join(""), op(withId(tree, "search-query"), "border_color")[0]],
+  [false, false, "SEARCH", "3 lines \u2026", "#ffb547"]);
+  r0 = withId(tree, "search-row-0");
+  assert.deepEqual(textOf(r0), ["src/", "a.ts", ":1:11", "const u = ", "fetchUser", "(id);"], "the old rows as a search shows them");
+  assert.deepEqual(textOf(withId(tree, "search-row-1")).slice(3), ["let ", "FetchUser", " = 1; // ", "fetchUser"]);
+  const hitEl = flatten(r0).find(n => n.kids.includes("fetchUser"));
+  assert.deepEqual([op(hitEl, "text_color")[0], Boolean(op(hitEl, "line_through"))], ["#ffb547", false], "lit amber, not struck out");
+  assert(!withId(tree, "search-pv-1-new-0") && withId(tree, "search-pv-1-0"), "the preview: each line once");
+  assert(flatten(withId(tree, "search-pv-1-0")).some(n => n.kids.includes("fetchUser") && op(n, "bg")?.[0] === "#ffb5474d"), "its match lit");
+  assert(!flatten(withId(tree, "search-pv-1-0")).some(n => op(n, "line_through")), "nothing struck out");
+  assert.deepEqual([op(withId(tree, "search-invert"), "cursor_pointer"), op(withId(tree, "search-unique"), "cursor_pointer")], [[], []],
+    "invert and one per file can go on again");
+  // (On again before the plain search's rows come: struck out again at once; and off.)
+  k("ctrl-r", { modifiers: { control: true } });
+  assert.deepEqual([textOf(withId(T(), "search-row-0")).slice(3), textOf(withId(T(), "search-count")).join(""), V().focus],
+    [["const u = ", "fetchUser", "loadAccount", "(id);"], "4 matches in 2 files \u2026", "replace"]);
+  k("ctrl-r", { modifiers: { control: true } });
+  assert.deepEqual(textOf(withId(T(), "search-row-0")).slice(3), ["const u = ", "fetchUser", "(id);"]);
+  await settle();
+  assert.deepEqual(last().slice(14), ["", ""], "the newest wins: a plain search");
+  alt("alt-r");
+  assert.equal(noteText(), "Ctrl-R first: the row for the new text");
+  // Its rows come: a search's.
+  host.files[`${DIR(runs.length)}/000000`] = [A, 1, 11, "const u = \x1b[0m\x1b[1m\x1b[31mfetchUser\x1b[0m(id);"].join("\x1f") + "\n";
+  host.files[`${DIR(runs.length)}/end`] = ""; await poll();
+  assert.deepEqual([V().rows.map(r => Boolean(r.json)), textOf(withId(T(), "search-count")).join("")], [[false], "1 line"]);
+  // Ctrl-R once more: the row back with its new text, typing there; a replace's run.
+  k("ctrl-r", { modifiers: { control: true } }); await settle();
+  assert.deepEqual([V().st.replacing, V().focus, last().slice(14), Boolean(withId(T(), "search-replace-row"))], [true, "replace", ["1", "loadAccount"], true]);
+  assert.equal(textOf(withId(T(), "search-head"))[0], "SEARCH & REPLACE");
+  // With replace off, Alt-Up and Alt-Down do nothing (the query types).
+  k("ctrl-r", { modifiers: { control: true } });
+  alt("alt-down");
+  assert.deepEqual([V().focus, V().note], ["query", null]);
+  k("ctrl-r", { modifiers: { control: true } }); await settle();
+  // The row's ✕ hides it too, and the search is a plain one again.
+  click(T(), "search-replace-hide"); await settle();
+  assert.deepEqual([V().st.replacing, V().focus, last().slice(14), Boolean(withId(T(), "search-replace-row"))], [false, "query", ["", ""], false]);
+  alt("alt-r");
+  assert.equal(noteText(), "Ctrl-R first: the row for the new text");
+  // Ctrl-R from filename mode: content mode, the row back with its text; invert and one per
+  // file go off. Ctrl-F hides the row (filename mode has no replace) and keeps it for later;
+  // back in content mode invert and one per file are off again, if they went on meanwhile.
+  k("ctrl-f", { modifiers: { control: true } }); alt("alt-v"); await settle();
+  k("ctrl-r", { modifiers: { control: true } }); await settle();
+  assert.deepEqual([V().st.mode, V().st.invert, V().st.rep, V().focus, last().slice(14)], ["content", false, "loadAccount", "replace", ["1", "loadAccount"]]);
+  k("ctrl-f", { modifiers: { control: true } }); await settle();
+  assert.deepEqual([Boolean(withId(T(), "search-replace-row")), last()[14], V().st.replacing, V().focus], [false, "", true, "query"]);
+  alt("alt-v"); alt("alt-u"); await settle();
+  assert.deepEqual([V().st.invert, V().st.unique, last()[6], last()[8]], [true, true, "1", "1"], "filename mode: invert and one per file work");
+  k("ctrl-f", { modifiers: { control: true } }); await settle();
+  assert(withId(T(), "search-replace-row"), "back in content mode, the row is back");
+  assert.deepEqual([V().st.invert, V().st.unique, last()[6], last()[8], last()[14]], [false, false, "", "", "1"], "invert and one per file off again");
+  assert.deepEqual([op(withId(T(), "search-invert"), "border_color")[0], op(withId(T(), "search-unique"), "border_color")[0]], [colors.input, colors.input]);
+  // Alt-Enter's JSON asks ripgrep with the list's options.
+  await feed(found());
+  alt("alt-m"); alt("alt-b"); await settle(); await feed(found());
+  alt("alt-enter"); await settle();
+  assert.deepEqual(rgJson.at(-1).slice(0, 7), ["--json", "--engine", "default", "--case-sensitive", "--word-regexp", "-e", "fetchUser"]);
+  // The space keeps it all for its next window, which opens to search: no replace row, a plain
+  // search, the new text kept for Ctrl-R.
+  const sv1 = sv;
+  sv = view(p); await settle();
+  assert.deepEqual([V().st.replacing, V().st.rep, V().focus, Boolean(withId(T(), "search-replace-row")), textOf(withId(T(), "search-head"))[0],
+    last()[3], last().slice(14)], [false, "loadAccount", "query", false, "SEARCH", "fetchUser", ["", ""]]);
+  k("ctrl-r", { modifiers: { control: true } }); await settle();
+  assert.deepEqual([V().focus, last().slice(14), V().st.case, V().st.word], ["replace", ["1", "loadAccount"], true, true], "Ctrl-R: the row with its new text");
+  await sv.searchView.close();
+  assert.deepEqual(host.shared.get(S.SEARCH_LAST).spaces.s0, { q: "fetchUser", fq: "", mode: "content", hidden: false, invert: false, pcre2: false,
+    unique: false, scope: "repo", case: true, word: true, literal: false, rep: "loadAccount", keep: false });
+  // Closing removes the replace's folder: undo ends with the window.
+  stops.length = 0;
+  await sv1.searchView.close();
+  assert.deepEqual(stops.at(-1).slice(2), ["", RD], "its run stopped, the replace's folder removed");
+  host.files = filesBefore;
+  host.execHook = null;
+}
+{
+  // Not in a repo: every replace asks, and says only undo can take it back. On another machine
+  // there's no replace (writeTextFile writes this Mac's files).
+  const DIR = n => `/tmp/T/ram-search.N${String(n).padStart(5, "0")}`;
+  const runs = [], stops = [];
+  host.execHook = (command, args) => {
+    if (command === "sh" && args[1] === S.RUN_SH) { const n = runs.push(args.slice(3)); return { code: 0, stdout: `${2000 + n}\n${DIR(n)}\n`, stderr: "" }; }
+    if (command === "sh" && args[1] === S.STOP_SH) { stops.push(args.slice(3)); return { code: 0, stdout: "", stderr: "" }; }
+    if (command === "sh" && args[1] === S.RDIR_SH) return { code: 0, stdout: "/tmp/T/ram-replace.Zz9999\n", stderr: "" };
+    if (command === "sh" && args[1] === S.REPLACE_SH) return { code: 0, stdout: "77 7\n", stderr: "" };
+    return null;
+  };
+  const filesBefore = host.files;
+  host.files = { "/home/tester/notes/n.md": "a fetchUser\n" };
+  host.shared.set(S.SEARCH_LAST, { look: {}, spaces: { s3: { q: "fetchUser", replacing: true, rep: "x", invert: true, unique: true } } });
+  const p = { role: "search", at: 888, space: "s3", name: "docs", machine: null, overlay: "o21", target: null, folder: "/home/tester/notes", repo: null };
+  host.shared.set(S.SEARCH_TOP, 888);
+  const sv = view(p); await settle();
+  const T = () => R(sv, p);
+  // (An older window's saved replace doesn't open one: a window opens to search, with invert and
+  // one per file as they were; Ctrl-R turns those off.)
+  assert.deepEqual([sv.searchView.st.replacing, sv.searchView.st.invert, sv.searchView.st.unique, runs[0].slice(14)], [false, true, true, ["", ""]],
+    "opens to search");
+  withId(T(), "ram-search").handlers.on_key_down({ key: "r", keystroke: "ctrl-r", modifiers: { control: true } }, cx); await settle();
+  assert.deepEqual([sv.searchView.st.invert, sv.searchView.st.unique, runs.at(-1).slice(14), runs.at(-1)[6], runs.at(-1)[8]], [false, false, ["1", "x"], "", ""],
+    "Ctrl-R: a replace, invert and one per file off");
+  host.files[`${DIR(runs.length)}/000000`] = JSON.stringify({ type: "match", data: { path: { text: "n.md" }, lines: { text: "a fetchUser\n" }, line_number: 1,
+    submatches: [{ match: { text: "fetchUser" }, replacement: { text: "x" }, start: 2, end: 11 }] } }) + "\n";
+  host.files[`${DIR(runs.length)}/end`] = "";
+  await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle();
+  withId(T(), "ram-search").handlers.on_key_down({ key: "r", keystroke: "alt-r", modifiers: { alt: true } }, cx);
+  assert.equal(textOf(withId(T(), "search-ask")).join(""), "Replace 1 match in 1 file? Not in a git repo: only Alt-Z undoes it.");
+  click(T(), "search-yes"); await settle();
+  assert.equal(host.files["/home/tester/notes/n.md"], "a x\n");
+  stops.length = 0;
+  await sv.searchView.close();
+  assert.deepEqual(stops.at(-1).slice(2), ["", ""], "no list; the replace's folder wasn't needed (a small file), so none to remove");
+  // An empty new text deletes: the question says so.
+  host.files["/home/tester/notes/n.md"] = "a fetchUser\n";
+  host.shared.set(S.SEARCH_LAST, { look: {}, spaces: { s3: { q: "fetchUser", replacing: true, rep: "" } } });
+  const sv2 = view(p); await settle();
+  withId(R(sv2, p), "ram-search").handlers.on_key_down({ key: "r", keystroke: "ctrl-r", modifiers: { control: true } }, cx); await settle();
+  const n2 = runs.length;
+  host.files[`${DIR(n2)}/000000`] = JSON.stringify({ type: "match", data: { path: { text: "n.md" }, lines: { text: "a fetchUser\n" }, line_number: 1,
+    submatches: [{ match: { text: "fetchUser" }, replacement: { text: "" }, start: 2, end: 11 }] } }) + "\n";
+  host.files[`${DIR(n2)}/end`] = "";
+  await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle();
+  withId(R(sv2, p), "ram-search").handlers.on_key_down({ key: "a", keystroke: "alt-a", modifiers: { alt: true } }, cx);
+  assert.equal(textOf(withId(R(sv2, p), "search-ask")).join(""), "Delete 1 match in 1 file? Not in a git repo: only Alt-Z undoes it.");
+  assert.deepEqual(textOf(withId(R(sv2, p), "search-row-0")).slice(2), ["a ", "fetchUser"], "struck out, nothing after it");
+  click(R(sv2, p), "search-no");
+  await sv2.searchView.close();
+  // The row with nothing to find yet: a plain search (the files), not a replace's run.
+  host.shared.set(S.SEARCH_LAST, { look: {}, spaces: { s3: { q: "", rep: "x" } } });
+  const svE = view(p); await settle();
+  withId(R(svE, p), "ram-search").handlers.on_key_down({ key: "r", keystroke: "ctrl-r", modifiers: { control: true } }, cx); await settle();
+  assert.deepEqual([Boolean(withId(R(svE, p), "search-replace-row")), runs.at(-1)[3], runs.at(-1)[14]], [true, "", ""]);
+  withId(R(svE, p), "ram-search").handlers.on_key_down({ key: "r", keystroke: "alt-r", modifiers: { alt: true } }, cx);
+  assert.equal(textOf(withId(R(svE, p), "search-note")).join(""), "Type what to find first");
+  await svE.searchView.close();
+  // Another machine's space: no replace row, its button says why, and its search is a plain one.
+  host.shared.set(S.SEARCH_LAST, { look: {}, spaces: { s3: { q: "fetchUser", replacing: true, rep: "x" } } });
+  const sv3 = view({ ...p, machine: "pc", at: 889 }); host.shared.set(S.SEARCH_TOP, 889); await settle();
+  const T3 = () => R(sv3, { ...p, machine: "pc", at: 889 });
+  assert(!withId(T3(), "search-replace-row"), "no replace row there");
+  assert.equal(runs.at(-1)[14], "", "a plain search");
+  withId(T3(), "ram-search").handlers.on_key_down({ key: "r", keystroke: "ctrl-r", modifiers: { control: true } }, cx);
+  assert.equal(textOf(withId(T3(), "search-note")).join(""), "Replace works on this Mac's files only");
+  assert.deepEqual([op(withId(T3(), "search-replace-on"), "cursor_pointer"), op(withId(T3(), "search-replace-on"), "tooltip")[0]],
+    [undefined, "Replace works on this Mac's files only  Ctrl-R"]);
+  await sv3.searchView.close();
+  host.files = filesBefore;
+  host.execHook = null;
+}
+{
+  // Halfway through a replace (or an undo) the window stays: Esc, its close button, Enter, Ctrl-O,
+  // Alt-Enter, Ctrl-E and a double-click wait, and so do another replace and undo (the note row
+  // says what it's doing). A newer window's close comes once it's done.
+  const DIR = n => `/tmp/T/ram-search.B${String(n).padStart(5, "0")}`, RD = "/tmp/T/ram-replace.Bb1234";
+  const runs = [], helpers = [];
+  let replaceOut = null, undoOut = null;
+  host.execHook = (command, args) => {
+    if (command === "sh" && args[1] === S.RUN_SH) { const n = runs.push(args.slice(3)); return { code: 0, stdout: `${3000 + n}\n${DIR(n)}\n`, stderr: "" }; }
+    if (command === "sh" && args[1] === S.STOP_SH) return { code: 0, stdout: "", stderr: "" };
+    if (command === "sh" && args[1] === S.RDIR_SH) return { code: 0, stdout: RD + "\n", stderr: "" };
+    if (command === "sh" && args[1] === S.REPLACE_SH) { helpers.push("replace"); return replaceOut; }
+    if (command === "sh" && args[1] === S.UNDO_SH) { helpers.push("undo"); return undoOut; }
+    if (command === "env" && args[1] === "bat") return { code: 0, stdout: "a fetchUser\n", stderr: "" };
+    return null;
+  };
+  const filesBefore = host.files;
+  host.files = {};
+  host.shared.set(S.SEARCH_LAST, { look: {}, spaces: { s5: { q: "fetchUser", rep: "x" } } });
+  const p = { role: "search", at: 901, space: "s5", name: "big", machine: null, overlay: "o23", target: { pane: "shell-pane", terminal: "shell" },
+    folder: "/repo/big", repo: "/repo/big" };
+  host.shared.set(S.SEARCH_TOP, 901);
+  const sv = view(p); await settle();
+  const V = () => sv.searchView, T = () => R(sv, p);
+  const k = (ks, extra = {}) => { withId(T(), "ram-search").handlers.on_key_down({ key: ks.split("-").pop(), keystroke: ks, modifiers: {}, ...extra }, cx); };
+  const noteText = () => textOf(withId(T(), "search-note")).join("");
+  const feed = async () => {
+    const d = DIR(runs.length);
+    host.files[`${d}/000000`] = JSON.stringify({ type: "match", data: { path: { text: "big.txt" }, lines: { text: "a fetchUser\n" }, line_number: 1,
+      submatches: [{ match: { text: "fetchUser" }, replacement: { text: "x" }, start: 2, end: 11 }] } }) + "\n";
+    host.files[`${d}/end`] = "";
+    await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle();
+  };
+  // Everything that would close the window, or replace or undo again.
+  const tryAll = async () => {
+    const nCalls = host.calls.length, nHelpers = helpers.length;
+    host.closed = [];
+    k("escape"); withId(T(), "ram-search").handlers["on_action:ram_search.escape"]({}, cx); click(T(), "search-close");
+    k("enter"); k("ctrl-o", { modifiers: { control: true } }); k("alt-enter", { modifiers: { alt: true } }); k("ctrl-e", { modifiers: { control: true } });
+    withId(T(), "search-row-0").handlers.on_click({ click_count: 2 }, cx);
+    k("alt-r", { modifiers: { alt: true } }); k("alt-a", { modifiers: { alt: true } }); k("alt-z", { modifiers: { alt: true } });
+    await settle();
+    return [host.closed, host.calls.length - nCalls, Boolean(V().leaving), helpers.length - nHelpers, V().ask];
+  };
+  k("ctrl-r", { modifiers: { control: true } }); await settle();
+  await feed();
+  let done;
+  replaceOut = new Promise(r => { done = r; });
+  k("alt-r", { modifiers: { alt: true } }); await settle();
+  assert.deepEqual([helpers, noteText()], [["replace"], "Replacing\u2026"]);
+  assert.deepEqual(await tryAll(), [[], 0, false, 0, null], "replacing: nothing closes it, nothing else starts");
+  done({ code: 0, stdout: "5 5\n", stderr: "" }); await settle();
+  assert.equal(noteText(), "Replaced 1 match in 1 file");
+  undoOut = new Promise(r => { done = r; });
+  k("alt-z", { modifiers: { alt: true } }); await settle();
+  assert.deepEqual([helpers, noteText()], [["replace", "undo"], "Undoing\u2026"]);
+  await feed();
+  assert.deepEqual(await tryAll(), [[], 0, false, 0, null], "undoing: the same");
+  // A newer window (^b / again) meanwhile: this one goes once the undo is done.
+  host.shared.set(S.SEARCH_TOP, 902);
+  T(); await settle();
+  assert.deepEqual([host.closed, Boolean(V().leaving)], [[], false]);
+  done({ code: 0, stdout: "", stderr: "" }); await settle();
+  T(); await settle();
+  assert.deepEqual([host.closed, noteText()], [["o23"], "Put back 1 file"], "then it closes");
+  await sv.searchView.close();
+  host.files = filesBefore;
+  host.execHook = null;
+}
+{
+  // The list wraps (Alt-Shift-W, its button too): a long line on as many rows as it needs, under
+  // where it is; the cursor's row stays whole on screen, page keys go by what fits.
+  const DIR = n => `/tmp/T/ram-search.W${String(n).padStart(5, "0")}`;
+  const runs = [];
+  host.execHook = (command, args) => {
+    if (command === "sh" && args[1] === S.RUN_SH) { const n = runs.push(1); return { code: 0, stdout: `${1000 + n}\n${DIR(n)}\n`, stderr: "" }; }
+    if (command === "sh" && args[1] === S.STOP_SH) return { code: 0, stdout: "", stderr: "" };
+    return null;
+  };
+  const filesBefore = host.files;
+  host.files = {};
+  host.shared.set(S.SEARCH_LAST, { look: {}, spaces: { s4: { q: "x" } } });
+  const p = { role: "search", at: 999, space: "s4", name: "w", machine: null, overlay: "o22", target: null, folder: "/repo/w", repo: "/repo/w" };
+  host.shared.set(S.SEARCH_TOP, 999);
+  const sv = view(p); await settle();
+  const V = sv.searchView, T = () => R(sv, p);
+  const k = ks => withId(T(), "ram-search").handlers.on_key_down({ key: ks.split("-").pop(), keystroke: ks, modifiers: {} }, cx);
+  const line = (f, l, text) => [f, l, 1, text].join("\x1f");
+  host.files[`${DIR(1)}/000000`] = [line("a.txt", 1, "x".repeat(250)), line("b.txt", 2, "short x"), line("c.txt", 3, "x".repeat(120)),
+    line("d.txt", 4, "x"), line("e.txt", 5, "x".repeat(250)), line("f.txt", 6, "x"), line("g.txt", 7, "x")].join("\n") + "\n";
+  host.files[`${DIR(1)}/end`] = "";
+  await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await settle();
+  // 100 characters a row: the list's width for it.
+  withId(T(), "search-list").handlers.on_size_change({ width: 100 * 11 * 1.25 * 0.6 + 30 * 1.25, height: 4 * 17 * 1.25 + 4 * 1.25 }, cx);
+  assert.deepEqual([V.listCols(), V.size.rows], [100, 4]);
+  let tree = T();
+  assert(withId(tree, "search-row-3") && !withId(tree, "search-row-0-1"), "unwrapped: a row a line, four of them");
+  k("alt-shift-w");
+  tree = T();
+  assert.deepEqual(op(withId(tree, "search-listwrap"), "border_color"), ["#ffb547"], "its button lit");
+  assert(withId(tree, "search-row-0-2") && !withId(tree, "search-row-0-3"), "250 characters on three rows (the first shorter, after where it is)");
+  assert.deepEqual(op(withId(tree, "search-row-0"), "h"), [3 * 17 * 1.25]);
+  assert(withId(tree, "search-row-1") && !withId(tree, "search-row-2"), "then b fits; c (two rows) doesn't");
+  assert.equal(textOf(withId(tree, "search-row-0")).filter(s => /^x+$/.test(s)).join("").length, 250, "all of it shows");
+  k("down"); k("down");
+  assert.deepEqual([V.cursor, V.top], [2, 1], "the cursor's row whole on screen: the list moves down");
+  k("pagedown");
+  assert.deepEqual([V.cursor, V.top], [4, 3], "a page: as many rows as fit (b c d), less one");
+  k("pageup"); k("pageup"); k("pageup"); k("pageup"); k("pageup");
+  assert.deepEqual([V.cursor, V.top], [0, 0]);
+  k("pagedown");
+  assert.deepEqual([V.cursor, V.top], [1, 0], "from the top only a and b fit: a page is one row");
+  k("pageup");
+  click(T(), "search-listwrap");
+  assert.equal(V.look.listWrap, false, "its button turns it off");
+  k("alt-shift-w");
+  await V.close();
+  assert.equal(host.shared.get(S.SEARCH_LAST).look.listWrap, true, "the next window wraps too");
+  const sv2 = view(p); await settle();
+  assert.equal(sv2.searchView.look.listWrap, true);
+  await sv2.searchView.close();
+  host.files = filesBefore;
+  host.execHook = null;
+}
+console.log("PASS: the search window's replace (Ctrl-R): ripgrep's JSON gives each match's new text; the list strikes it out and shows the new text, the preview shows each line twice; Alt-R the picked lines (else this one), Alt-A all after a question, Alt-Z undo; only the lines listed, each checked first, through writeTextFile or REPLACE_SH; keep case, match case, whole words, literal; the list wraps");
+{
+  // At random, seeded (a failure says its seed and steps, and repeats): keys, clicks, typing and
+  // results coming in, in any order, in a repo and outside one. After each step the window agrees
+  // with a model of what was done: replace on or off (its row, the head, the count, the list's and
+  // the preview's look, the run's flags), which field types and where, each option, the note and
+  // the question; the list holds the lines that came; the preview shows the files as they are now;
+  // files change only by a replace or an undo, and then as the rows shown say (each match's new
+  // text from the run, its case kept or not); keys are in words. A closed window's next one opens
+  // to search, with the same options and new text.
+  const SEEDS = Number(process.env.RAM_SEEDS ?? 30), STEPS = Number(process.env.RAM_STEPS ?? 80);
+  const ROOT = "/repo/rnd", SUB = "/repo/rnd/b", D = n => `/tmp/T/ram-search.R${String(n).padStart(5, "0")}`;
+  const START = { "a.txt": "ab ba\nAb aB\nxx\n", "b/c.txt": "bab\n\tab ab\nAB\n", "b/\u00e9.md": "\u00e9 ab\nno\n", "b/.h.txt": "ab\n",
+    "e.txt": "ba", "f.txt": "ab\r\nb\r\n" };
+  const AMB = "#ffb547", RED = "#ff5f6d", GRN = "#7dff9b", ALPHA = ["a", "b", "A", "x", "\u00e9"];
+  const quick = async () => { for (let i = 0; i < 4; i++) await new Promise(r => setImmediate(r)); };
+  const prng = seed => () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  let rnd = prng(1);
+  const pickOf = list => list[Math.floor(rnd() * list.length)];
+  const pl = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  const linesOf = text => text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  // fzf's filter, roughly: the pattern's characters in order (smart case).
+  const fuzzy = (pat, s) => {
+    const cs = pat !== pat.toLowerCase(), a = cs ? s : s.toLowerCase(), b = cs ? pat : pat.toLowerCase();
+    let i = 0;
+    for (const ch of a) if (ch === b[i]) i++;
+    return i === b.length;
+  };
+  // Keep case as its doc says: all capitals, a capital first, else a small letter first.
+  const kc = (m, rep) => {
+    const cased = c => c.toLowerCase() !== c.toUpperCase(), L = [...m].filter(cased);
+    if (!L.length || !rep) return rep;
+    if (L.length > 1 && L.every(c => c === c.toUpperCase())) return rep.toUpperCase();
+    const ch = [...rep], i = ch.findIndex(cased);
+    if (i < 0) return rep;
+    ch[i] = L[0] === L[0].toUpperCase() ? ch[i].toUpperCase() : ch[i].toLowerCase();
+    return ch.join("");
+  };
+  const nowOf = (m, rep, keep) => keep ? kc(m, rep) : rep;
+  const newRaw = (d, keep) => {
+    let s = "", last = 0;
+    for (const m of d.ms) { s += d.raw.slice(last, m.i) + nowOf(m.m, d.rep, keep); last = m.i + m.m.length; }
+    return s + d.raw.slice(last);
+  };
+  // ripgrep as the window runs it (RUN_SH's arguments), over the files under CWD: plain rows, or
+  // a replace's JSON (each line's matches and what they become, kept for the model).
+  const rg = (a, cwd) => {
+    const [, , , q, fq, hidden, invert, , unique, , , cs, word, , json, rep] = a;
+    const names = Object.keys(host.files).filter(f => f.startsWith(cwd + "/")).map(f => f.slice(cwd.length + 1))
+      .filter(f => hidden === "1" || !f.split("/").some(s => s.startsWith("."))).filter(f => !fq || fuzzy(fq, f)).sort();
+    if (!q) return { meta: 0, lines: names, keys: names.map(f => `${f}:`), data: new Map() };
+    const re = new RegExp(word === "1" ? `(?<![\\p{L}\\p{N}_])${q}(?![\\p{L}\\p{N}_])` : q, cs === "1" ? "gu" : "giu");
+    const lines = [], keys = [], data = new Map();
+    for (const f of names) {
+      let first = true;
+      linesOf(host.files[`${cwd}/${f}`]).forEach((raw, i) => {
+        const body = raw.replace(/\n$/, ""), ms = [...body.matchAll(re)].map(m => ({ i: m.index, m: m[0] }));
+        const at = n => Buffer.byteLength(body.slice(0, n));
+        if (json === "1") {
+          if (!ms.length) return;
+          lines.push(JSON.stringify({ type: "match", data: { path: { text: f }, lines: { text: raw }, line_number: i + 1, absolute_offset: 0,
+            submatches: ms.map(m => ({ match: { text: m.m }, replacement: { text: rep }, start: at(m.i), end: at(m.i + m.m.length) })) } }));
+          keys.push(`${f}:${i + 1}`);
+          data.set(`${f}:${i + 1}`, { file: f, line: i + 1, raw, ms, rep });
+          return;
+        }
+        if ((invert === "1") === (ms.length > 0) || (unique === "1" && !first)) return;
+        first = false;
+        keys.push(`${f}:${i + 1}`);
+        if (invert === "1") { lines.push([f, i + 1, body].join("\x1f")); data.set(`${f}:${i + 1}`, { body, ms: [] }); return; }
+        let s = "", last = 0;
+        for (const m of ms) { s += body.slice(last, m.i) + "\x1b[0m\x1b[1m\x1b[31m" + m.m + "\x1b[0m"; last = m.i + m.m.length; }
+        lines.push([f, i + 1, at(ms[0].i) + 1, s + body.slice(last)].join("\x1f"));
+        data.set(`${f}:${i + 1}`, { body, ms });
+      });
+    }
+    return { meta: invert === "1" ? 2 : 3, lines, keys, data };
+  };
+  const runs = [];
+  host.execHook = (command, args, opts) => {
+    if (command === "sh" && args[1] === S.RUN_SH) {
+      const a = args.slice(3), n = runs.length + 1, got = rg(a, opts.cwd);
+      runs.push({ n, args: a, cwd: opts.cwd, dir: D(n), json: a[14] === "1", ...got, sent: 0, ended: false });
+      return { code: 0, stdout: `${7000 + n}\n${D(n)}\n`, stderr: "" };
+    }
+    if (command === "sh" && args[1] === S.STOP_SH) return { code: 0, stdout: "", stderr: "" };
+    if (command === "env" && args[1] === "bat") {
+      const [a, b] = args[args.indexOf("--line-range") + 1].split(":").map(Number), text = host.files[`${opts.cwd}/${args.at(-1)}`];
+      if (text === undefined) return { code: 1, stdout: "", stderr: "[bat error]: no such file\n" };
+      return { code: 0, stdout: linesOf(text).slice(a - 1, b).map(l => l.replace(/\n$/, "") + "\n").join(""), stderr: "" };
+    }
+    if (command === "rg") return { code: 0, stdout: "", stderr: "" };
+    return null;
+  };
+  const filesBefore = host.files;
+  let M, sv, p, nWin = 0;
+  const V = () => sv.searchView, T = () => R(sv, p);
+  const on = () => M.st.replacing && M.st.mode === "content";
+  const field = () => M.st.mode === "filename" ? "fq" : "q";
+  const canScope = () => Boolean(p.repo) && p.repo !== p.folder;
+  const open = async inRepo => {
+    nWin += 1;
+    p = { role: "search", at: 5000 + nWin, space: "s9", name: "rnd", machine: null, overlay: `oR${nWin}`,
+      target: { pane: "shell-pane", terminal: "shell" }, folder: SUB, repo: inRepo ? ROOT : null };
+    host.shared.set(S.SEARCH_TOP, p.at);
+    host.closed = [];
+    sv = view(p); await quick();
+    Object.assign(M, { focus: "query", at: M.st[field()].length, rat: M.st.rep.length, help: false, ask: null, askRows: null, note: null,
+      undo: [], shown: null, closing: false });
+    M.st.replacing = false;
+  };
+  // The newest run's lines come: ALL of them, else one or two more (its end once they're all there).
+  const deliver = async all => {
+    const r = runs.at(-1);
+    if (r.ended) return;
+    r.sent = all || !r.lines.length ? r.lines.length : Math.min(r.lines.length, r.sent + 1 + Math.floor(rnd() * 2));
+    if (r.sent) host.files[`${r.dir}/000000`] = r.lines.slice(0, r.sent).join("\n") + "\n";
+    if (r.sent === r.lines.length) { host.files[`${r.dir}/end`] = ""; r.ended = true; }
+    M.shown = r;
+    await host.timers.filter(t => t.ms === 40).at(-1).fn(cx); await quick();
+  };
+  // The model of the window: what each action does.
+  const searched = () => { M.note = null; };
+  const replaceRows = rows => {
+    const run = M.shown, byFile = new Map(), before = {};
+    for (const r of rows) {
+      const abs = `${run.cwd}/${r.file}`;
+      if (!byFile.has(abs)) byFile.set(abs, []);
+      byFile.get(abs).push(run.data.get(`${r.file}:${r.line}`));
+    }
+    let files = 0, matches = 0;
+    for (const [abs, list] of byFile) {
+      const ls = linesOf(M.files[abs]);
+      for (const d of list) { assert.equal(ls[d.line - 1], d.raw, "(the model: the file is as the run read it)"); ls[d.line - 1] = newRaw(d, M.st.keep); }
+      if (ls.join("") === M.files[abs]) continue;
+      before[abs] = M.files[abs];
+      M.files[abs] = ls.join("");
+      files += 1;
+      matches += list.reduce((k, d) => k + d.ms.length, 0);
+    }
+    if (files) { M.undo.push(before); if (M.undo.length > S.UNDO_STEPS) M.undo.shift(); }
+    M.note = files ? `Replaced ${pl(matches, "match", "matches")} in ${pl(files, "file")}` : "Nothing changed";
+    M.shown = null;
+  };
+  // The rows the list draws: each picked, or under the cursor (what a replace takes).
+  const drawn = () => {
+    const t = T();
+    return V().rows.map((r, i) => ({ file: r.file, line: r.line, picked: op(withId(t, `search-pick-${i}`), "bg")?.[0] === AMB,
+      here: op(withId(t, `search-row-${i}`), "bg")?.[0] === AMB + "1f" }));
+  };
+  const askOrReplace = all => {
+    const st = M.st, nr = runs.at(-1);
+    if (!on()) { M.note = "Ctrl-R first: the row for the new text"; return; }
+    if (!st.q) { M.note = "Type what to find first"; return; }
+    if (M.shown !== nr || !nr.json) { M.note = "Still searching: a moment"; return; }
+    if (all && !nr.ended) { M.note = "Still searching: replace all waits for every line"; return; }
+    const rows = drawn(), picked = rows.filter(r => r.picked), here = rows.filter(r => r.here);
+    if (rows.length) assert.equal(here.length, 1, "one row under the cursor");
+    const chosen = all ? rows : picked.length ? picked : here;
+    if (!chosen.length) { M.note = "Nothing to replace here"; return; }
+    if (!all && p.repo) { replaceRows(chosen); return; }
+    const m = chosen.reduce((k, r) => k + nr.data.get(`${r.file}:${r.line}`).ms.length, 0), f = new Set(chosen.map(r => r.file)).size;
+    M.ask = `${nr.args[15] === "" ? "Delete" : "Replace"} ${pl(m, "match", "matches")} in ${pl(f, "file")}?`
+      + (p.repo ? "" : " Not in a git repo: only Alt-Z undoes it.");
+    M.askRows = chosen;
+  };
+  const doAct = name => {
+    const st = M.st, rows = M.shown ? M.shown.sent : 0;
+    if (name !== "keys" && name !== "close") M.help = false;
+    if (M.ask && name !== "yes" && name !== "no") { M.ask = null; M.askRows = null; }
+    switch (name) {
+      case "files": case "lines": case "json": case "edit": if (rows) M.closing = true; return;
+      case "copy": M.look.copy = !M.look.copy; return;
+      case "mode":
+        st.mode = st.mode === "content" ? "filename" : "content";
+        if (on()) { st.invert = false; st.unique = false; }
+        M.focus = "query"; M.at = st[field()].length; searched(); return;
+      case "pcre2": case "hidden": case "case": case "word": case "literal": st[name] = !st[name]; searched(); return;
+      case "invert": case "unique":
+        if (on()) { M.note = "Off while replacing (Ctrl-R turns replace off)"; return; }
+        st[name] = !st[name]; searched(); return;
+      case "scope": if (canScope()) { st.scope = st.scope === "repo" ? "folder" : "repo"; searched(); } return;
+      case "replace":
+        if (on()) { st.replacing = false; M.focus = "query"; searched(); return; }
+        if (st.mode !== "content") { st.mode = "content"; M.at = st.q.length; }
+        Object.assign(st, { replacing: true, invert: false, unique: false });
+        M.focus = "replace"; M.rat = Math.min(M.rat, st.rep.length); searched(); return;
+      case "hide": if (st.replacing) { st.replacing = false; M.focus = "query"; searched(); } return;
+      case "tofind": case "torep":
+        if (!on()) return;
+        M.focus = name === "tofind" ? "query" : "replace";
+        if (name === "torep") M.rat = Math.min(M.rat, st.rep.length);
+        return;
+      case "keep": st.keep = !st.keep; return;
+      case "apply": case "applyall": askOrReplace(name === "applyall"); return;
+      case "undo": {
+        const u = M.undo.pop();
+        if (!u) { M.note = "Nothing to undo"; return; }
+        Object.assign(M.files, u);
+        M.note = `Put back ${pl(Object.keys(u).length, "file")}`;
+        M.shown = null;
+        return;
+      }
+      case "yes": if (M.ask) { const rows2 = M.askRows; M.ask = null; M.askRows = null; replaceRows(rows2); } return;
+      case "no": M.ask = null; M.askRows = null; return;
+      case "preview": case "wrap": case "numbers": M.look[name] = !M.look[name]; return;
+      case "listwrap": M.look.listWrap = !M.look.listWrap; return;
+      case "divleft": case "divright":
+        M.look.split = Math.round(Math.min(S.SPLIT_MAX, Math.max(S.SPLIT_MIN, M.look.split + (name === "divleft" ? S.DIV_STEP : -S.DIV_STEP))) * 1000) / 1000;
+        return;
+      case "keys": M.help = !M.help; return;
+      case "close": M.closing = true; return;
+      default: return;   // the picks, the cursor and the preview's place: read off the list as drawn
+    }
+  };
+  // A key as the window's key handler takes it (CH: the character it types).
+  const doKey = (ks, ch) => {
+    if (M.ask) { if (ks === "enter") doAct("yes"); else if (ks === "escape") doAct("no"); return; }
+    if (S.ACTIONS[ks]) { doAct(S.ACTIONS[ks]); return; }
+    const rep = M.focus === "replace" && on(), key = rep ? "rep" : field(), pos = rep ? "rat" : "at";
+    let v = M.st[key], at = Math.min(M[pos], v.length);
+    if (ks === "backspace") { if (at) { v = v.slice(0, at - 1) + v.slice(at); at -= 1; } }
+    else if (ks === "delete") v = v.slice(0, at) + v.slice(at + 1);
+    else if (ks === "left") at = Math.max(0, at - 1);
+    else if (ks === "right") at = Math.min(v.length, at + 1);
+    else if (ks === "home") at = 0;
+    else if (ks === "end") at = v.length;
+    else if (ks === "cmd-backspace") { v = v.slice(at); at = 0; }
+    else { v = v.slice(0, at) + ch + v.slice(at); at += ch.length; }
+    M[pos] = at;
+    if (v !== M.st[key]) { M.st[key] = v; searched(); }
+  };
+  const press = (ks, ch) => {
+    doKey(ks, ch);
+    const parts = ks.split("-");
+    withId(T(), "ram-search").handlers.on_key_down({ key: ch ?? parts.at(-1), keystroke: ks, key_char: ch,
+      modifiers: { control: parts.includes("ctrl"), alt: parts.includes("alt"), shift: parts.includes("shift"), platform: parts.includes("cmd") } }, cx);
+  };
+  const BUTTONS = { "search-replace-on": "replace", "search-case": "case", "search-word": "word", "search-literal": "literal",
+    "search-pcre2": "pcre2", "search-invert": "invert", "search-hidden": "hidden", "search-unique": "unique", "search-preview": "preview",
+    "search-wrap": "wrap", "search-listwrap": "listwrap", "search-numbers": "numbers", "search-scope": "scope", "search-keys": "keys",
+    "search-close": "close", "search-mode": "mode", "search-find": "tofind", "search-replace-field": "torep", "search-replace-hide": "hide",
+    "search-keep": "keep", "search-apply": "apply", "search-applyall": "applyall", "search-undo": "undo", "search-yes": "yes",
+    "search-no": "no", "search-files": "files", "search-lines": "lines", "search-json": "json", "search-copy": "copy",
+    "search-edit": "edit", "search-next": "next", "search-prev": "prev", "search-all": "all", "search-none": "none" };
+  const LEAVE = new Set(["close", "files", "lines", "json", "edit"]);
+  // Which buttons there are, and which a click works on, as the model has it.
+  const present = id => ({ "search-find": on(), "search-replace-field": on(), "search-replace-hide": on(), "search-keep": on(),
+    "search-apply": on(), "search-applyall": on(), "search-undo": on(), "search-yes": Boolean(M.ask), "search-no": Boolean(M.ask) })[id]
+    ?? (["search-files", "search-lines", "search-json", "search-copy", "search-edit", "search-next", "search-prev", "search-all", "search-none"]
+      .includes(id) ? !M.ask : true);
+  const enabled = id => ({ "search-invert": !on(), "search-unique": !on(), "search-scope": canScope(),
+    "search-apply": Boolean(M.shown?.json && M.shown.sent), "search-applyall": Boolean(M.shown?.json && M.shown.sent),
+    "search-undo": M.undo.length > 0 })[id] ?? true;
+  const clickButton = () => {
+    const t = T(), ids = Object.keys(BUTTONS);
+    for (const id of ids) assert.equal(Boolean(withId(t, id)), present(id), `${id} there`);
+    const list = ids.filter(present).flatMap(id => LEAVE.has(BUTTONS[id]) ? [id] : [id, id, id, id]);
+    const id = pickOf(list);
+    assert.equal(Boolean(op(withId(t, id), "cursor_pointer")), enabled(id), `${id} works`);
+    if (enabled(id)) doAct(BUTTONS[id]);
+    click(t, id);
+    return id;
+  };
+  const STEP_LIST = [
+    [12, () => { const v = M.focus === "replace" && on() ? M.st.rep : M.st[field()], ch = pickOf(ALPHA);
+      if (v.length >= 5) { press("backspace"); return "backspace"; } press(ch, ch); return `type ${ch}`; }],
+    [4, () => { press("backspace"); return "backspace"; }],
+    [3, () => { const ks = pickOf(["left", "right", "home", "end", "delete", "cmd-backspace"]); press(ks); return ks; }],
+    [7, () => { press("ctrl-r"); return "ctrl-r"; }],
+    [4, () => { const ks = pickOf(["alt-up", "alt-down"]); press(ks); return ks; }],
+    [3, () => { press("ctrl-f"); return "ctrl-f"; }],
+    [8, () => { const ks = pickOf(["alt-m", "alt-b", "alt-l", "alt-p", "alt-i", "alt-v", "alt-u", "alt-k", "alt-s"]); press(ks); return ks; }],
+    [3, () => { const ks = pickOf(["ctrl-p", "alt-w", "alt-shift-w", "alt-n", "alt-c", "alt-[", "alt-]", "alt-/", "f1", "ctrl-d", "ctrl-u"]);
+      press(ks); return ks; }],
+    [6, () => { const ks = pickOf(["tab", "tab", "shift-tab", "ctrl-a", "ctrl-z", "up", "down", "down", "pageup", "pagedown", "ctrl-j", "ctrl-k"]);
+      press(ks); return ks; }],
+    [2, () => { const a = pickOf(["next", "prev", "escape"]);
+      if (a === "escape") doAct(M.ask ? "no" : "close"); else if (!M.ask) doAct(a);
+      withId(T(), "ram-search").handlers[`on_action:ram_search.${a}`]({}, cx); return `(bound) ${a}`; }],
+    [6, () => { press("alt-r"); return "alt-r"; }],
+    [5, () => { press("alt-a"); return "alt-a"; }],
+    [3, () => { press("alt-z"); return "alt-z"; }],
+    [0.5, () => { const ks = pickOf(["enter", "escape", "ctrl-o", "alt-enter", "ctrl-e"]); press(ks); return ks; }],
+    [() => M.ask ? 30 : 0, () => { const ks = pickOf(["enter", "escape"]); press(ks); return ks; }],
+    [10, async () => { await deliver(false); return "some lines come"; }],
+    [7, async () => { await deliver(true); return "the rest come"; }],
+    [12, () => `click ${clickButton()}`],
+    [3, () => {
+      const which = on() && rnd() < 0.5 ? "replace" : "query", v = which === "replace" ? M.st.rep : M.st[field()], c = Math.floor(rnd() * (v.length + 2));
+      M[which === "replace" ? "rat" : "at"] = Math.min(c, v.length); M.focus = which; M.ask = null; M.askRows = null;
+      withId(T(), which === "replace" ? "search-rfield" : "search-field").handlers["on_mouse_down:left"]({ local_position: { x: c * 12 * 1.25 * 0.6 } }, cx);
+      return `click the ${which} field at ${c}`;
+    }],
+    [() => M.st[field()] ? 1 : 0, () => {
+      M.ask = null; M.askRows = null; M.st[field()] = ""; M.at = 0; M.focus = "query"; searched();
+      click(T(), "search-clear"); return "click the query's \u2715";
+    }],
+    [() => !M.help && M.shown?.sent ? 4 : 0, () => {
+      const i = Math.floor(rnd() * M.shown.sent), how = pickOf(["click", "click", "cmd-click", "pick box", "double-click"]);
+      M.ask = null; M.askRows = null;
+      if (how === "pick box") { click(T(), `search-pick-${i}`); return `pick box ${i}`; }
+      if (how === "double-click") M.closing = true;
+      withId(T(), `search-row-${i}`).handlers.on_click({ click_count: how === "double-click" ? 2 : 1, modifiers: { platform: how === "cmd-click" } }, cx);
+      return `${how} row ${i}`;
+    }],
+    [() => M.help ? 4 : 0, () => {
+      const a = pickOf([...new Set(S.KEYS.map(k => k[1]))].filter(x => !LEAVE.has(x) || rnd() < 0.2));
+      if (a === "keys") M.help = false; else doAct(a);
+      click(T(), `search-key-${a}`); return `the key list's ${a}`;
+    }],
+    // A replace from start to end, one step at a time (each checked): replace on (the name filter
+    // and whole words mostly off, so it finds something), a query and new text typed, its lines
+    // in, Alt-R or Alt-A (yes or no), sometimes an undo after.
+    [9, () => {
+      const key = ks => () => { press(ks); return ks; };
+      const clear = () => [key("end"), key("cmd-backspace")];
+      const typed = s => [...s].map(ch => () => { press(ch, ch); return `type ${ch}`; });
+      // (Steps decided when their turn comes: the state may have changed by then.)
+      const lazy = (cond, steps) => () => { if (cond()) queue.unshift(...steps()); return null; };
+      queue.push(
+        lazy(() => !on(), () => [key("ctrl-r")]),
+        lazy(() => M.st.fq && rnd() < 0.7, () => [key("ctrl-f"), ...clear(), key("ctrl-f")]),
+        lazy(() => M.st.word && rnd() < 0.7, () => [key("alt-b")]),
+        key("alt-up"),
+        lazy(() => !M.st.q || rnd() < 0.5, () => [...clear(), ...typed(pickOf(["a", "b", "x", "A", "ab", "ba", "aB", "xx", "\u00e9", "bab", "no"]))]),
+        key("alt-down"),
+        lazy(() => rnd() < 0.6, () => [...clear(), ...typed(Array.from({ length: Math.floor(rnd() * 4) }, () => pickOf(ALPHA)).join(""))]),
+        async () => { await deliver(true); return "the rest come"; },
+        () => { const ks = pickOf(["alt-r", "alt-r", "alt-a"]); press(ks); return ks; },
+        lazy(() => Boolean(M.ask), () => [key(rnd() < 0.8 ? "enter" : "escape")]),
+        lazy(() => rnd() < 0.35, () => [async () => { await deliver(true); return "the rest come"; }, key("alt-z")]));
+      return null;
+    }],
+  ];
+  const queue = [];
+  const step = async () => {
+    for (;;) {
+      let name;
+      if (queue.length) name = await queue.shift()();
+      else {
+        const ws = STEP_LIST.map(([w]) => typeof w === "function" ? w() : w), total = ws.reduce((k, w) => k + w, 0);
+        let x = rnd() * total, i = 0;
+        while (x >= ws[i]) x -= ws[i++];
+        name = await STEP_LIST[i][1]();
+      }
+      if (name === null) continue;
+      await quick();
+      return name;
+    }
+  };
+  // The view a row shows (what viewRuns makes of its parts: the lead's blanks out, tabs to 4).
+  const viewOf = (segs, cut) => {
+    const out = [];
+    let lead = true, col = 0, n = 0;
+    for (const [mark, text] of segs) {
+      let s = "";
+      for (const ch of text) {
+        if (lead && (ch === " " || ch === "\t")) continue;
+        lead = false;
+        if (n >= cut) break;
+        if (ch === "\t") { const w = 4 - (col % 4); s += " ".repeat(w); col += w; n += w; } else { s += ch; col += 1; n += 1; }
+      }
+      if (!s) continue;
+      if (out.at(-1)?.[0] === mark) out.at(-1)[1] += s; else out.push([mark, s]);
+    }
+    return out;
+  };
+  const markOf = n => {
+    const c = op(n, "text_color")?.[0], struck = Boolean(op(n, "line_through"));
+    assert.equal(struck, c === RED, "struck out only where it's red");
+    return c === RED ? "old" : c === GRN ? "new" : c === AMB ? "hit" : "";
+  };
+  const drawnRuns = row => {
+    const runs2 = [...row.kids[0].kids.slice(2), ...row.kids.slice(1).flatMap(k => k.kids.slice(1))], out = [];
+    for (const n of runs2) {
+      const mark = markOf(n), s = n.kids[0];
+      if (out.at(-1)?.[0] === mark) out.at(-1)[1] += s; else out.push([mark, s]);
+    }
+    return out;
+  };
+  const check = async label => {
+    T(); await quick();
+    const v = V(), t = T(), st = M.st, isOn = on(), nr = runs.at(-1), say = `${label}: `;
+    assert.deepEqual({ ...v.st }, { ...st }, say + "the options");
+    assert.deepEqual([v.replaceOn(), v.focus, v.at, v.rat, Boolean(v.help), v.ask?.text ?? null, v.note?.text ?? null, v.busy],
+      [isOn, M.focus, M.at, M.rat, M.help, M.ask, M.note, null], say + "replace, the field that types, the key list, the question, the note");
+    assert.deepEqual({ ...v.look }, M.look, say + "the look");
+    // The newest run: the options as they are now.
+    const json = st.replacing && st.mode === "content" && st.q !== "";
+    assert.deepEqual([nr.args[2], nr.args[3], nr.args[4], nr.args[5], nr.args[6], nr.args[7], nr.args[8], nr.args[11], nr.args[12], nr.args[13],
+      nr.args[14], nr.args[15], nr.cwd], [st.mode, st.q, st.fq, st.hidden ? "1" : "", st.invert ? "1" : "", st.pcre2 ? "pcre2" : "default",
+      st.unique ? "1" : "", st.case ? "1" : "", st.word ? "1" : "", st.literal ? "1" : "", json ? "1" : "", json ? st.rep : "",
+      st.scope === "repo" && p.repo ? p.repo : p.folder], say + "the newest run");
+    // The rows: the lines that came, in order.
+    assert.deepEqual(v.rows.map(r => `${r.file}:${r.line ?? ""}`), M.shown ? M.shown.keys.slice(0, M.shown.sent) : [], say + "the rows");
+    // The window as drawn.
+    assert.equal(Boolean(withId(t, "search-replace-row")), isOn, say + "the replace row");
+    assert.equal(textOf(withId(t, "search-head"))[0], isOn ? "SEARCH & REPLACE" : "SEARCH", say + "the head");
+    assert.equal(op(withId(t, "search-query"), "border_color")[0], M.focus === "query" || !isOn ? AMB : colors.input, say + "the query's border");
+    if (isOn) assert.equal(op(withId(t, "search-replace"), "border_color")[0], M.focus === "replace" ? AMB : colors.input, say + "the new text's border");
+    for (const k of ["case", "word", "literal", "pcre2", "invert", "hidden", "unique"])
+      assert.equal(op(withId(t, `search-${k}`), "border_color")[0], st[k] ? AMB : colors.input, say + k);
+    for (const k of ["invert", "unique"]) assert.equal(Boolean(op(withId(t, `search-${k}`), "cursor_pointer")), !isOn, say + k + " works");
+    assert.equal(textOf(withId(t, "search-ask")).join("") || null, M.ask, say + "the question");
+    assert.equal(textOf(withId(t, "search-note")).join("") || null, M.note, say + "the note row");
+    const swap = isOn && Boolean(M.shown?.json), dots = nr.ended && M.shown === nr ? "" : " \u2026";
+    let count;
+    if (swap) {
+      const got = M.shown.keys.slice(0, M.shown.sent).map(k => M.shown.data.get(k)), m = got.reduce((k, d) => k + d.ms.length, 0);
+      count = `${pl(m, "match", "matches")} in ${pl(new Set(got.map(d => d.file)).size, "file")}${dots}`;
+    } else {
+      const n = M.shown ? M.shown.sent : 0, meta = M.shown ? M.shown.meta : !st.q ? 0 : st.invert ? 2 : 3;
+      count = `${pl(n, meta === 0 ? "file" : "line")}${dots}`;
+    }
+    assert.equal(textOf(withId(t, "search-count")).join(""), count, say + "the count");
+    for (const x of [...textOf(t), ...flatten(t).flatMap(n => n.ops.filter(o => o[0] === "tooltip").map(o => o[1]))])
+      assert(!/[\u2325\u21e5\u21e7\u23ce\u2318\u232b]|\^[a-z]/.test(x), `${say}in words: ${x}`);
+    if (!M.help) {
+      // Each row: its matches lit; with replace on, struck out with the new text after it (unless it stays the same).
+      const cols = v.listCols();
+      v.rows.forEach((r, i) => {
+        const row = withId(t, `search-row-${i}`), k = M.shown.keys[i], d = M.shown.data.get(k), loc = r.kind === "file" ? "" : r.kind === "line" ? `:${r.line}` : `:${r.line}:${r.col}`;
+        const cut = M.look.listWrap ? Infinity : Math.max(4, cols - Array.from(r.file + loc).length - 2) + 8;
+        const segs = [];
+        if (d) {
+          // (A plain row's text goes through the color reader, which drops a CR.)
+          const body = M.shown.json ? d.raw.replace(/\r?\n$/, "") : d.body.replace(/\r/g, "");
+          let last = 0;
+          for (const m of d.ms) {
+            segs.push(["", body.slice(last, m.i)]);
+            const now = nowOf(m.m, d.rep, st.keep);
+            if (!swap || !M.shown.json || now === m.m) segs.push(["hit", m.m]); else segs.push(["old", m.m], ["new", now]);
+            last = m.i + m.m.length;
+          }
+          segs.push(["", body.slice(last)]);
+        }
+        assert.deepEqual(drawnRuns(row), viewOf(segs, cut), `${say}row ${i} (${k})`);
+      });
+      // The preview: the file under the cursor as it is now; with replace on, each line that
+      // changes twice (struck out, then as it will be).
+      const here = v.rows.findIndex((_, i) => op(withId(t, `search-row-${i}`), "bg")?.[0] === AMB + "1f");
+      assert.equal(here, v.rows.length ? v.cursor : -1, say + "the cursor's row lit");
+      if (M.look.preview && here >= 0) {
+        const r = v.rows[here], text = M.files[`${M.shown.cwd}/${r.file}`], ls = linesOf(text ?? "").map(l => l.replace(/\n$/, "").replace(/\r/g, ""));
+        const shownLines = flatten(withId(t, "search-pv")).map(idOf).filter(id => /^search-pv-\d+-0$/.test(id ?? ""));
+        if (text === "") assert(textOf(withId(t, "search-pv")).includes("(empty)"), say + "an empty file");
+        else assert(shownLines.length, say + "the preview shows its lines");
+        const lineText = id => { const n = withId(t, id), parts = textOf(n); return M.look.numbers ? parts.slice(1).join("") : parts.join(""); };
+        const tabs = s => { let o = "", c = 0; for (const ch of s) { if (ch === "\t") { const w = 4 - (c % 4); o += " ".repeat(w); c += w; } else { o += ch; c += 1; } } return o; };
+        for (const id of shownLines) {
+          const n = Number(id.split("-")[2]), d = M.shown.json ? M.shown.data.get(`${r.file}:${n}`) : null;
+          const listed = d && M.shown.keys.slice(0, M.shown.sent).includes(`${r.file}:${n}`);
+          assert.equal(lineText(id), tabs(ls[n - 1]), `${say}preview line ${n}`);
+          const changing = Boolean(swap && listed && d.ms.some(m => nowOf(m.m, d.rep, st.keep) !== m.m));
+          assert.equal(Boolean(withId(t, `search-pv-${n}-new-0`)), changing, `${say}preview line ${n} twice`);
+          if (changing) assert.equal(lineText(`search-pv-${n}-new-0`), tabs(newRaw(d, st.keep).replace(/\n$/, "").replace(/\r/g, "")), `${say}preview line ${n} as it will be`);
+        }
+      }
+    }
+    assert(!flatten(t).some(n => /^search-pv-\d+-new-/.test(idOf(n) ?? "")) || swap, say + "no new lines without a replace");
+    // The files: changed only by a replace or an undo, as the model says.
+    for (const f of new Set([...Object.keys(M.files), ...Object.keys(host.files).filter(f => f.startsWith(ROOT + "/"))]))
+      assert.equal(host.files[f], M.files[f], `${say}${f}`);
+    assert.equal(host.closed.includes(p.overlay), Boolean(M.closing), say + "closed or not");
+  };
+  let steps = 0, windows = 0, replaced = 0, undone = 0, asked = 0;
+  for (let seed = 1; seed <= SEEDS; seed++) {
+    rnd = prng(seed * 7919);
+    queue.length = 0;
+    host.files = Object.fromEntries(Object.entries(START).map(([f, text]) => [`${ROOT}/${f}`, text]));
+    host.shared.delete(S.SEARCH_LAST);
+    M = { st: { q: "", fq: "", mode: "content", hidden: false, invert: false, pcre2: false, unique: false, scope: "repo", case: false,
+      word: false, literal: false, rep: "", keep: false, replacing: false },
+    look: { preview: true, wrap: false, numbers: true, copy: false, split: S.SPLIT, listWrap: false }, files: { ...host.files } };
+    await open(rnd() < 0.6); windows += 1;
+    const log = [];
+    try {
+      await check(`seed ${seed}, opened`);
+      for (let s = 1; s <= STEPS; s++) {
+        M.closing = false;
+        const before = JSON.stringify(M.files), asks = M.ask;
+        const name = await step();
+        log.push(name);
+        await check(`seed ${seed}, step ${s} (${name})`);
+        steps += 1;
+        if (JSON.stringify(M.files) !== before) { if (/z$|undo/.test(name)) undone += 1; else replaced += 1; }
+        if (M.ask && !asks) asked += 1;
+        if (M.closing) {
+          // Herdr closes the dialog; the space's next window opens to search.
+          await V().close();
+          const saved = host.shared.get(S.SEARCH_LAST), { replacing: _, ...keep } = M.st;
+          assert.deepEqual([saved.spaces.s9, saved.look], [keep, M.look], `seed ${seed}, step ${s}: kept for the next window`);
+          await open(rnd() < 0.6); windows += 1;
+          await check(`seed ${seed}, step ${s}: the next window`);
+        }
+      }
+    } catch (e) {
+      e.message += `\n  (seed ${seed}; steps: ${log.join(", ")})`;
+      throw e;
+    }
+    await V().close();
+  }
+  assert(replaced > SEEDS && undone > SEEDS / 2 && asked > SEEDS / 2 && windows > SEEDS, `enough of each: ${replaced} replaces, ${undone} undos, ${asked} questions, ${windows} windows`);
+  host.files = filesBefore;
+  host.execHook = null;
+  console.log(`PASS: the search window at random (${SEEDS} seeds, ${steps} steps, ${windows} windows; ${replaced} replaces, ${undone} undos, ${asked} questions): after every step it agrees with a model of what was done: replace on or off (row, head, count, list, preview, the run's flags), the field that types, each option, the note and question; files change only by a replace or undo, as the rows shown say; a closed window's next one opens to search`);
+}
 
 // ---- LANG: the space's repo by language, under GIT (space level) ---------------------------
 {

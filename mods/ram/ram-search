@@ -6,6 +6,8 @@
 # prompt in a Herdr terminal.
 #   ram-search src/ README.md     git ls-files | ram-search     fd -e rs | ram-search
 die() { echo "ram-search: $*" >&2; exit 1; }
+# Names are bytes (macOS's tr refuses one that isn't UTF-8 in a UTF-8 locale).
+export LC_ALL=C
 [ -n "$HC_TERMINAL_ID" ] || die "run it in a Herdr terminal (HC_TERMINAL_ID isn't set)"
 list=$(mktemp "${TMPDIR:-/tmp}/ram-search-list.XXXXXX") || die "couldn't make a file for the list"
 if [ "$#" -gt 0 ]; then
