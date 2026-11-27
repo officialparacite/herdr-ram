@@ -133,14 +133,11 @@ replace, a ctrl-b key bar and a Neovim theme.
   in words, as rg-fzf's help writes them. Only the rows and lines that fit are
   drawn.
 - **The credits** (a click on the strip's space name, or `^b R`): a dialog as
-  wide as its longest line (625px) and as tall as what's in it. `RAM` (cyan)
-  and `a Herdr layout`; "Work on many projects at once and see all of them on
-  one screen."; `Made by` and the author's name, Srivatsa Kannan (amber);
-  "Copyright 2026 Srivatsa Kannan · Apache License 2.0"; the repo's address,
-  underlined, and `↗` (a click opens it in the browser); `Thanks to` and a row
-  for each project RAM builds on (its name, `by` its author, what it gave and
-  its license, as NOTICE has them); and an `Esc close` button. Enter or Esc
-  closes it too.
+  wide as its longest line (466px) and as tall as what's in it. `RAM` (cyan)
+  and `a Herdr layout`; `Made by` and the author's name, Srivatsa Kannan
+  (amber); "Copyright 2026 Srivatsa Kannan · Apache License 2.0"; the repo's
+  address, underlined, and `↗` (a click opens it in the browser); and an
+  `Esc close` button. Enter or Esc closes it too.
 - **The terminal menu** (right-click on a terminal, mod `ram-menu`): Copy and
   Paste, then Herdr's own items (split right and down, zoom, where
   right-clicks go, back to the parent, close pane), each with its key.
